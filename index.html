@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d9488">
+<title>จองคิวทำฟันออนไลน์</title>
+<meta name="description" content="จองคิวทำฟันช่วงเช้าออนไลน์ ยืนยันทันที ได้ใบนัดทันที เลื่อนนัดเองได้">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="container">
+    <a class="brand" href="./">
+      <span class="logo"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.5c-2 0-3.2 1-5 1-2.2 0-3.5 1.7-3.5 4.2 0 2.2 1 3.7 1.6 6 .6 2.3.8 7.3 2.9 7.3 1.6 0 1.4-4.2 4-4.2s2.4 4.2 4 4.2c2.1 0 2.3-5 2.9-7.3.6-2.3 1.6-3.8 1.6-6 0-2.5-1.3-4.2-3.5-4.2-1.8 0-3-1-5-1z"/></svg></span>
+      <div><b id="brandName">งานทันตกรรม</b><span id="brandSub">ระบบนัดหมายออนไลน์</span></div>
+    </a>
+    <span class="spacer"></span>
+    <a class="btn sm ghost" href="admin.html" id="staffLink">สำหรับเจ้าหน้าที่</a>
+  </div>
+</header>
+
+<main class="container">
+  <section class="hero">
+    <h1>จองคิวทำฟัน<em>ออนไลน์</em><br>ยืนยันทันที ไม่ต้องรอโทรกลับ</h1>
+    <p>เลือกวัน–เวลาที่ว่างช่วงเช้า รับใบนัดได้ในไม่กี่ขั้นตอน เลื่อนนัดเองได้ผ่านหน้าเว็บนี้</p>
+    <div class="chips" id="chips"></div>
+  </section>
+
+  <div class="tabs" role="tablist" aria-label="เมนู">
+    <button class="tab" role="tab" id="tab-book" aria-selected="true" aria-controls="view-book">จองนัดใหม่</button>
+    <button class="tab" role="tab" id="tab-manage" aria-selected="false" aria-controls="view-manage">ตรวจสอบ / เลื่อนนัด</button>
+  </div>
+
+  <section id="view-book" role="tabpanel" aria-labelledby="tab-book"></section>
+  <section id="view-manage" role="tabpanel" aria-labelledby="tab-manage" hidden></section>
+
+  <p class="footer">ข้อมูลของท่านใช้เพื่อการนัดหมายเท่านั้น และเก็บรักษาไว้ไม่เกิน 1 ปี<br>เจ้าหน้าที่จะตรวจสอบสิทธิการรักษาจริงอีกครั้งก่อนให้บริการ</p>
+</main>
+
+<script src="engine.js"></script>
+<script src="config.js"></script>
+<script src="api.js"></script>
+<script>
+(function () {
+'use strict';
+var $ = function (s, r) { return (r || document).querySelector(s); };
+var esc = DQ.esc, ic = DQ.ic, thai = DQ.thaiDate;
+var cfg = null;
+var TR_ICON = { fill: 'tooth', scale: 'sun', extract: 'x' };
+var TR_HINT = { fill: 'คิวช่วง 09:00–10:00 น.', scale: 'คิวช่วง 10:00–11:30 น.', extract: 'คิวช่วง 10:00–11:30 น.' };
+
+function fmtPhone(p) { p = String(p || ''); return p.length === 10 ? p.slice(0, 3) + '-' + p.slice(3, 6) + '-' + p.slice(6) : p; }
+function trId(name) { var t = cfg.treatments.filter(function (x) { return x.name === name || x.id === name; })[0]; return t ? t.id : 'fill'; }
+function trName(id) { var t = cfg.treatments.filter(function (x) { return x.id === id; })[0]; return t ? t.name : id; }
+function contactLine() {
+  var ph = cfg.clinicPhone || DQ.CFG.CLINIC_PHONE;
+  return ph ? 'กรุณาติดต่อเจ้าหน้าที่ โทร. <a href="tel:' + esc(ph.replace(/[^\d+]/g, '')) + '">' + esc(ph) + '</a>' : 'กรุณาติดต่อเจ้าหน้าที่ที่คลินิกทันตกรรม';
+}
+
+/* =============================== ตัวเลือกวัน-เวลา =============================== */
+function createPicker(root, opt) {
+  var st = { month: null, date: null, time: null, av: {}, times: null, seq: 0 };
+  var minM = cfg.minDate.slice(0, 7), maxM = cfg.maxDate.slice(0, 7);
+  st.month = minM;
+
+  function key() { return st.month + '|' + opt.treatment(); }
+  function shiftMonth(ym, n) { var p = ym.split('-'); var d = new Date(+p[0], +p[1] - 1 + n, 1); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2); }
+  function emit() { opt.onChange && opt.onChange({ date: st.date, time: st.time }); }
+
+  function render() {
+    var days = st.av[key()], first = st.month + '-01';
+    var offset = DQ.util.dow(first), n = new Date(+st.month.slice(0, 4), +st.month.slice(5, 7), 0).getDate();
+    var map = {}; (days || []).forEach(function (d) { map[d.date] = d; });
+    var cells = '';
+    for (var i = 0; i < offset; i++) cells += '<span></span>';
+    for (var d = 1; d <= n; d++) {
+      var ds = st.month + '-' + ('0' + d).slice(-2), x = map[ds], cls = 'day none', sub = '', dis = ' disabled', lab = '';
+      if (x) {
+        if (x.state === 'open') { cls = 'day open'; sub = '<small>ว่าง ' + x.remaining + '</small>'; dis = ''; lab = ' aria-label="' + thai(ds) + ' ว่าง ' + x.remaining + ' คิว"'; }
+        else if (x.state === 'full') { cls = 'day full'; sub = '<small>คิวเต็ม</small>'; lab = ' aria-label="' + thai(ds) + ' คิวเต็ม"'; }
+        else { cls = 'day closed'; sub = '<small>ปิด</small>'; lab = ' aria-label="' + thai(ds) + ' ปิดให้บริการ"'; }
+      }
+      if (ds === st.date) cls += ' sel';
+      if (ds === cfg.today) cls += ' today';
+      cells += '<button type="button" class="' + cls + '" data-d="' + ds + '"' + dis + lab + '>' + d + sub + '</button>';
+    }
+    var dow = DQ.TH_D.map(function (t, i) { return '<div class="cal-dow"' + (i === 0 || i === 6 ? ' style="opacity:.55"' : '') + '>' + t.slice(0, 2).replace('พฤ', 'พฤ') + '</div>'; }).join('');
+    root.innerHTML =
+      '<div class="cal"><div class="cal-head">' +
+      '<button type="button" class="icon-btn" data-nav="-1" aria-label="เดือนก่อนหน้า"' + (st.month <= minM ? ' disabled' : '') + '>' + ic('chevL') + '</button>' +
+      '<b>' + DQ.thaiMonth(st.month) + '</b>' +
+      '<button type="button" class="icon-btn" data-nav="1" aria-label="เดือนถัดไป"' + (st.month >= maxM ? ' disabled' : '') + '>' + ic('chevR') + '</button></div>' +
+      '<div class="cal-grid">' + dow + (days ? cells : '<div class="skeleton" style="grid-column:1/-1;height:260px"></div>') + '</div>' +
+      '<div class="legend"><span><i style="background:var(--surface);border:1px solid var(--line)"></i>เลือกได้</span><span><i style="background:var(--bad-bg)"></i>คิวเต็ม</span><span><i style="background:var(--mute-bg)"></i>ปิดให้บริการ</span></div></div>' +
+      '<div class="mt" id="slotArea"></div>';
+    renderSlots();
+  }
+
+  function renderSlots() {
+    var box = root.querySelector('#slotArea'); if (!box) return;
+    if (!st.date) { box.innerHTML = '<p class="muted small">เลือกวันที่จากปฏิทิน แล้วเลือกเวลาที่ว่าง</p>'; return; }
+    if (!st.times) { box.innerHTML = '<div class="skeleton" style="height:56px"></div>'; return; }
+    if (st.times === 'err') { box.innerHTML = '<div class="notice bad">โหลดเวลาไม่สำเร็จ <button type="button" class="btn sm" data-retry="1">ลองใหม่</button></div>'; return; }
+    if (!st.times.length) { box.innerHTML = '<div class="notice warn">' + ic('alert') + '<span><b>คิวเต็ม</b> — วันที่ ' + thai(st.date) + ' ไม่มีเวลาว่างสำหรับการรักษานี้ กรุณาเลือกวันอื่น</span></div>'; return; }
+    box.innerHTML = '<div class="lbl" style="margin-bottom:8px">เลือกเวลา — ' + thai(st.date) + '</div><div class="slots" role="radiogroup" aria-label="เวลาที่ว่าง">' +
+      st.times.map(function (t) { return '<button type="button" role="radio" aria-checked="' + (t === st.time) + '" class="slot' + (t === st.time ? ' sel' : '') + '" data-t="' + t + '">' + t + ' น.</button>'; }).join('') + '</div>';
+  }
+
+  async function loadMonth() {
+    if (st.av[key()]) return render();
+    render();
+    var k = key(), my = ++st.seq;
+    try {
+      var r = await DQ.call('availability', { month: st.month, treatment: opt.treatment() });
+      st.av[k] = r.days;
+    } catch (e) { DQ.toast(e.message, 'err'); st.av[k] = []; }
+    if (my === st.seq) render();
+  }
+  async function loadSlots() {
+    st.times = null; renderSlots();
+    var my = ++st.seq;
+    try {
+      var r = await DQ.call('slots', { date: st.date, treatment: opt.treatment(), excludeNo: opt.excludeNo ? opt.excludeNo() : undefined });
+      if (my !== st.seq) return; st.times = r.times;
+    } catch (e) { if (my !== st.seq) return; st.times = 'err'; }
+    renderSlots();
+  }
+
+  root.addEventListener('click', function (e) {
+    var nav = e.target.closest('[data-nav]'), day = e.target.closest('.day.open'), slot = e.target.closest('.slot'), rt = e.target.closest('[data-retry]');
+    if (nav) { st.month = shiftMonth(st.month, +nav.dataset.nav); loadMonth(); }
+    else if (day) { st.date = day.dataset.d; st.time = null; emit(); root.querySelectorAll('.day.sel').forEach(function (b) { b.classList.remove('sel'); }); day.classList.add('sel'); loadSlots(); }
+    else if (slot) { st.time = slot.dataset.t; emit(); renderSlots(); }
+    else if (rt) loadSlots();
+  });
+
+  return {
+    mount: loadMonth,
+    reset: function () { st.av = {}; st.date = null; st.time = null; st.times = null; emit(); loadMonth(); },
+    refresh: function () { st.av = {}; st.time = null; emit(); loadMonth().then(function () { if (st.date) loadSlots(); }); },
+    value: function () { return { date: st.date, time: st.time }; }
+  };
+}
+
+/* =============================== ใบนัด =============================== */
+function slipHtml(a, pin, opt) {
+  opt = opt || {};
+  return '<div class="slip-wrap"><div class="slip" id="slip">' +
+    '<div class="slip-top"><span class="ok">' + ic('check', 16) + (opt.title || 'ยืนยันนัดหมายแล้ว') + '</span>' +
+    '<h2>' + esc(DQ.CFG.CLINIC_NAME || 'งานทันตกรรม') + ' ' + esc(DQ.CFG.HOSPITAL_NAME || '') + '</h2><div class="no">' + esc(a.apptNo) + '</div></div>' +
+    '<div class="slip-body">' +
+    row('ชื่อ–นามสกุล', esc(a.title + a.firstName + ' ' + a.lastName)) + row('เบอร์โทรศัพท์', fmtPhone(a.phone)) +
+    row('วันที่นัด', thai(a.date, { full: true })) + row('เวลา', a.time + ' น.') +
+    row('ประเภทการรักษา', esc(a.treatment)) + row('สิทธิการรักษา', esc(a.rights)) + '</div>' +
+    (pin ? '<div class="slip-pin"><small>รหัสยืนยันสำหรับเลื่อนนัด (เก็บไว้ ห้ามแจ้งผู้อื่น)</small><b>' + esc(pin) + '</b></div>' : '') +
+    '<div class="slip-foot"><b>โปรดมาถึงก่อนเวลานัด 10–15 นาที</b><br>หากเลยเวลานัดเกิน 10 นาที เจ้าหน้าที่จะตรวจสอบและพิจารณาว่ายังรับบริการได้หรือไม่<br>เจ้าหน้าที่จะตรวจสอบสิทธิการรักษาอีกครั้งก่อนให้บริการ</div></div>' +
+    '<div class="slip-actions"><button class="btn primary" data-act="img">' + ic('download', 18) + 'บันทึกเป็นรูปภาพ</button><button class="btn" data-act="print">' + ic('print', 18) + 'พิมพ์ / PDF</button>' +
+    '<button class="btn full ghost" data-act="again">กลับหน้าหลัก</button></div></div>';
+  function row(k, v) { return '<div class="slip-row"><span>' + k + '</span><b>' + v + '</b></div>'; }
+}
+function bindSlip(root, a, onAgain) {
+  root.addEventListener('click', async function (e) {
+    var b = e.target.closest('[data-act]'); if (!b) return;
+    if (b.dataset.act === 'print') window.print();
+    else if (b.dataset.act === 'again') onAgain();
+    else if (b.dataset.act === 'img') {
+      DQ.busy(b, true, 'กำลังสร้างรูป…');
+      try {
+        if (!window.html2canvas) await DQ.loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+        var cv = await html2canvas($('#slip'), { scale: 2, backgroundColor: null, useCORS: true });
+        var l = document.createElement('a'); l.download = 'ใบนัด-' + a.apptNo + '.png'; l.href = cv.toDataURL('image/png'); l.click();
+      } catch (err) { DQ.toast('บันทึกรูปไม่สำเร็จ กรุณาแคปหน้าจอแทน', 'err'); }
+      DQ.busy(b, false);
+    }
+  });
+}
+
+/* =============================== จองนัดใหม่ =============================== */
+var Book = (function () {
+  var root = $('#view-book'), S, picker;
+  function fresh(prefill) {
+    S = { step: 1, f: Object.assign({ title: '', firstName: '', lastName: '', age: '', phone: '', rights: '', consent: false }, prefill || {}), treatment: 'fill', date: null, time: null, rid: null };
+  }
+  fresh();
+
+  function stepper() {
+    var names = ['ข้อมูลผู้ป่วย', 'เลือกวัน–เวลา', 'ตรวจสอบและยืนยัน'];
+    return '<ol class="stepper" style="list-style:none;padding:0" aria-label="ขั้นตอนการจอง">' + names.map(function (n, i) {
+      var k = i + 1, cls = k === S.step ? 'on' : (k < S.step ? 'done' : '');
+      return (i ? '<li class="step-line ' + (k <= S.step ? 'on' : '') + '" aria-hidden="true"></li>' : '') +
+        '<li class="step ' + cls + '"' + (k === S.step ? ' aria-current="step"' : '') + '><i>' + (k < S.step ? ic('check', 14) : k) + '</i><span>' + n + '</span></li>';
+    }).join('') + '</ol>';
+  }
+
+  function render(quiet) {
+    if (S.step === 1) step1(); else if (S.step === 2) step2(); else step3();
+    if (quiet !== true) window.scrollTo({ top: Math.max(0, root.getBoundingClientRect().top + scrollY - 80), behavior: 'smooth' });
+  }
+
+  /* ---- 1: ข้อมูล ---- */
+  function step1() {
+    var f = S.f;
+    root.innerHTML = stepper() + '<div class="card"><div class="panel-title"><h2>ข้อมูลผู้ป่วย</h2><p>ทุกช่องจำเป็น</p></div>' +
+      '<form id="f1" novalidate autocomplete="on"><div class="grid2">' +
+      '<div class="field"><label for="title">คำนำหน้า</label><select class="input" id="title" autocomplete="honorific-prefix"><option value="">เลือก</option>' + cfg.titles.map(function (t) { return '<option' + (f.title === t ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') + '</select><div class="errmsg" id="e-title"></div></div>' +
+      '<div class="field"><label for="age">อายุ (ปี)</label><input class="input" id="age" inputmode="numeric" maxlength="3" autocomplete="off" value="' + esc(f.age) + '" placeholder="เช่น 35"><div class="errmsg" id="e-age"></div></div>' +
+      '<div class="field"><label for="firstName">ชื่อ</label><input class="input" id="firstName" autocomplete="given-name" maxlength="60" value="' + esc(f.firstName) + '"><div class="errmsg" id="e-firstName"></div></div>' +
+      '<div class="field"><label for="lastName">นามสกุล</label><input class="input" id="lastName" autocomplete="family-name" maxlength="60" value="' + esc(f.lastName) + '"><div class="errmsg" id="e-lastName"></div></div>' +
+      '</div><div class="field mt"><label for="phone">เบอร์โทรศัพท์ (ตัวเลข 10 หลัก)</label><input class="input num" id="phone" type="tel" inputmode="numeric" autocomplete="tel-national" maxlength="12" value="' + esc(f.phone) + '" placeholder="0812345678"><div class="errmsg" id="e-phone"></div></div>' +
+      '<div class="field mt"><span class="lbl">สิทธิการรักษา</span><div class="choice-grid" role="radiogroup" aria-label="สิทธิการรักษา">' +
+      cfg.rights.map(function (r, i) { return '<label class="choice"><input type="radio" name="rights" value="' + esc(r) + '"' + (f.rights === r ? ' checked' : '') + '><span class="box"><span class="ico">' + ic(['shield', 'ticket', 'user'][i] || 'user', 20) + '</span><span><b>' + esc(r) + '</b></span></span></label>'; }).join('') +
+      '</div><div class="errmsg" id="e-rights"></div><p class="xs muted">เจ้าหน้าที่จะตรวจสอบสิทธิการรักษาจริงอีกครั้งก่อนให้บริการ</p></div>' +
+      '<label class="check mt"><input type="checkbox" id="consent"' + (f.consent ? ' checked' : '') + '><span>ข้าพเจ้ายินยอมให้เก็บและใช้ข้อมูลข้างต้นเพื่อการนัดหมายและการให้บริการทางทันตกรรม โดยเก็บรักษาไว้ไม่เกิน 1 ปี</span></label><div class="errmsg" id="e-consent"></div>' +
+      '<div class="actions"><span></span><button class="btn primary" type="submit">ถัดไป ' + ic('chevR', 18) + '</button></div></form></div>';
+    var ph = $('#phone', root);
+    ph.addEventListener('input', function () { ph.value = ph.value.replace(/\D/g, '').slice(0, 10); });
+    $('#age', root).addEventListener('input', function (e) { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 3); });
+    $('#f1', root).addEventListener('submit', function (e) { e.preventDefault(); if (collect()) { S.step = 2; render(); } });
+  }
+  function collect() {
+    var f = S.f, ok = true, first = null;
+    f.title = $('#title', root).value; f.firstName = $('#firstName', root).value.trim().replace(/\s+/g, ' '); f.lastName = $('#lastName', root).value.trim().replace(/\s+/g, ' ');
+    f.age = $('#age', root).value.trim(); f.phone = $('#phone', root).value.replace(/[\s-]/g, '');
+    var r = root.querySelector('input[name=rights]:checked'); f.rights = r ? r.value : ''; f.consent = $('#consent', root).checked;
+    function bad(id, msg) { var el = $('#e-' + id, root); el.textContent = msg || ''; var inp = $('#' + id, root); if (inp) inp.classList.toggle('err', !!msg); if (msg) { ok = false; first = first || inp || el; } }
+    bad('title', f.title ? '' : 'กรุณาเลือกคำนำหน้า');
+    bad('firstName', !f.firstName ? 'กรุณากรอกชื่อ' : /[<>]/.test(f.firstName) ? 'ห้ามใช้สัญลักษณ์ < >' : '');
+    bad('lastName', !f.lastName ? 'กรุณากรอกนามสกุล' : /[<>]/.test(f.lastName) ? 'ห้ามใช้สัญลักษณ์ < >' : '');
+    var age = parseInt(f.age, 10); bad('age', (isNaN(age) || age < 0 || age > 120) ? 'กรุณากรอกอายุ 0–120 ปี' : '');
+    bad('phone', /^\d{10}$/.test(f.phone) ? '' : 'กรุณากรอกเบอร์โทรศัพท์ 10 หลัก');
+    bad('rights', f.rights ? '' : 'กรุณาเลือกสิทธิการรักษา'); bad('consent', f.consent ? '' : 'กรุณากดยอมรับเพื่อดำเนินการต่อ');
+    if (first && first.focus) first.focus();
+    return ok;
+  }
+
+  /* ---- 2: วัน-เวลา ---- */
+  function step2() {
+    root.innerHTML = stepper() + '<div class="card"><div class="panel-title"><h2>เลือกการรักษาและวัน–เวลา</h2><p>เปิดจอง ' + thai(cfg.minDate, { noDay: true }) + ' – ' + thai(cfg.maxDate, { noDay: true }) + '</p></div>' +
+      '<span class="lbl">ประเภทการรักษา</span><div class="choice-grid c3 mt-s" role="radiogroup" aria-label="ประเภทการรักษา">' +
+      cfg.treatments.map(function (t) { return '<label class="choice"><input type="radio" name="tr" value="' + t.id + '"' + (S.treatment === t.id ? ' checked' : '') + '><span class="box"><span class="ico">' + ic(TR_ICON[t.id], 20) + '</span><span><b>' + esc(t.name) + '</b><small>' + TR_HINT[t.id] + '</small></span></span></label>'; }).join('') + '</div>' +
+      '<div class="mt-l" id="pick"></div>' +
+      '<div class="actions"><button class="btn" id="back">' + ic('chevL', 18) + 'ย้อนกลับ</button><button class="btn primary" id="next" disabled>ถัดไป ' + ic('chevR', 18) + '</button></div></div>';
+    picker = createPicker($('#pick', root), {
+      treatment: function () { return S.treatment; },
+      onChange: function (v) { S.date = v.date; S.time = v.time; $('#next', root).disabled = !(v.date && v.time); }
+    });
+    picker.mount();
+    root.querySelectorAll('input[name=tr]').forEach(function (r) { r.addEventListener('change', function () { S.treatment = r.value; S.date = S.time = null; picker.reset(); }); });
+    $('#back', root).onclick = function () { S.step = 1; render(); };
+    $('#next', root).onclick = function () { if (S.date && S.time) { S.rid = DQ.uuid(); S.step = 3; render(); } };
+    S.date = S.time = null;
+  }
+
+  /* ---- 3: ตรวจสอบ ---- */
+  function step3() {
+    var f = S.f, tn = trName(S.treatment);
+    root.innerHTML = stepper() + '<div class="layout"><div class="card"><div class="panel-title"><h2>ตรวจสอบรายละเอียด</h2><p>กรุณาตรวจสอบก่อนกดยืนยัน</p></div>' +
+      '<div class="confirm-line">คุณกำลังจองคิว<b> ' + esc(tn) + ' </b>วันที่ <b>' + thai(S.date, { noDay: false, full: false }) + '</b> เวลา <b>' + S.time + ' น.</b></div>' +
+      '<div class="summary mt"><dl class="grid2"><div><dt>ชื่อ–นามสกุล</dt><dd>' + esc(f.title + f.firstName + ' ' + f.lastName) + '</dd></div><div><dt>อายุ</dt><dd>' + esc(f.age) + ' ปี</dd></div>' +
+      '<div><dt>เบอร์โทรศัพท์</dt><dd class="num">' + fmtPhone(f.phone) + '</dd></div><div><dt>สิทธิการรักษา</dt><dd>' + esc(f.rights) + '</dd></div></dl></div>' +
+      '<div id="err3"></div><div class="notice mt">' + ic('info') + '<span>โปรดมาถึงก่อนเวลานัด 10–15 นาที การจองสำเร็จจะได้รับการยืนยันทันที ไม่ต้องรอเจ้าหน้าที่</span></div>' +
+      '<div class="actions"><button class="btn" id="back">' + ic('chevL', 18) + 'แก้ไข</button><button class="btn primary" id="ok">' + ic('check', 18) + 'ยืนยันการจอง</button></div></div>' +
+      '<aside class="aside card"><h3>ข้อควรทราบ</h3><ul class="small muted" style="padding-left:18px;margin:10px 0 0;display:grid;gap:8px"><li>มีนัดที่ยังไม่สิ้นสุดได้ครั้งละ 1 นัด</li><li>เลื่อนนัดเองได้ที่แท็บ “ตรวจสอบ / เลื่อนนัด” โดยใช้เลขที่นัด เบอร์โทร และรหัสยืนยัน</li><li>ช่วงบ่ายและเคสพิเศษ ทันตแพทย์/เจ้าหน้าที่เป็นผู้นัดให้</li></ul></aside></div>';
+    $('#back', root).onclick = function () { S.step = 2; render(); };
+    $('#ok', root).onclick = confirm;
+  }
+  async function confirm() {
+    var btn = $('#ok', root); DQ.busy(btn, true, 'กำลังจอง…'); $('#err3', root).innerHTML = '';
+    try {
+      var r = await DQ.call('book', Object.assign({}, S.f, { treatment: S.treatment, date: S.date, time: S.time }), { requestId: S.rid });
+      showSlip(r);
+    } catch (e) {
+      DQ.busy(btn, false);
+      if (['SLOT_TAKEN', 'TREATMENT_MISMATCH', 'CLOSED', 'OUT_OF_WINDOW', 'NOT_OPEN', 'PAST'].indexOf(e.code) >= 0) {
+        DQ.toast(e.message, 'err'); S.step = 2; render();
+      } else {
+        $('#err3', root).innerHTML = '<div class="notice bad mt">' + ic('alert') + '<span>' + esc(e.message) + (e.code === 'ACTIVE_EXISTS' || e.code === 'TOO_MANY' ? '<br>' + contactLine() : '') + '</span></div>';
+      }
+    }
+  }
+  function showSlip(r) {
+    root.innerHTML = '<div class="notice ok" style="max-width:460px;margin:0 auto 14px">' + ic('check') + '<span>จองสำเร็จ! กรุณาบันทึกใบนัดและเก็บ “รหัสยืนยัน” ไว้สำหรับเลื่อนนัด</span></div>' + slipHtml(r.appt, r.pin);
+    bindSlip(root, r.appt, function () { fresh(); render(); });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  return { render: function () { render(true); }, startNext: function (prefill) { fresh(prefill); S.step = 2; render(); }, showSlip: showSlip };
+})();
+
+/* =============================== ตรวจสอบ / เลื่อนนัด =============================== */
+var Manage = (function () {
+  var root = $('#view-manage'), cred = null, appt = null, picker, pick = {};
+  function form(msg) {
+    root.innerHTML = '<div class="layout"><div class="card"><div class="panel-title"><h2>ตรวจสอบนัดหมาย</h2><p>ใช้ข้อมูลจากใบนัด</p></div>' +
+      '<form id="fm" novalidate><div class="field"><label for="no">เลขที่นัดหมาย</label><input class="input num" id="no" placeholder="เช่น D101126-001" autocapitalize="characters" autocomplete="off" value="' + esc(cred ? cred.apptNo : '') + '"></div>' +
+      '<div class="grid2 mt"><div class="field"><label for="mp">เบอร์โทรศัพท์</label><input class="input num" id="mp" type="tel" inputmode="numeric" maxlength="12" autocomplete="tel-national"></div>' +
+      '<div class="field"><label for="pin">รหัสยืนยัน 4 หลัก</label><input class="input num" id="pin" inputmode="numeric" maxlength="4" autocomplete="off" type="password"></div></div>' +
+      (msg ? '<div class="notice bad mt">' + ic('alert') + '<span>' + msg + '</span></div>' : '') +
+      '<div class="actions"><span></span><button class="btn primary" type="submit">' + ic('search', 18) + 'ตรวจสอบ</button></div></form></div>' +
+      '<aside class="aside card"><h3>ไม่มีรหัสยืนยัน?</h3><p class="small muted mt-s">รหัสยืนยันอยู่บนใบนัดที่ได้รับหลังจองสำเร็จ หากสูญหาย ' + contactLine() + '</p></aside></div>';
+    $('#mp', root).addEventListener('input', function (e) { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 10); });
+    $('#pin', root).addEventListener('input', function (e) { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4); });
+    $('#fm', root).addEventListener('submit', async function (e) {
+      e.preventDefault(); var b = $('button[type=submit]', root);
+      cred = { apptNo: $('#no', root).value.trim().toUpperCase(), phone: $('#mp', root).value.replace(/[\s-]/g, ''), pin: $('#pin', root).value.trim() };
+      if (!cred.apptNo || cred.phone.length !== 10 || cred.pin.length !== 4) return form('กรุณากรอกเลขที่นัด เบอร์โทร 10 หลัก และรหัสยืนยัน 4 หลักให้ครบ');
+      DQ.busy(b, true, 'กำลังตรวจสอบ…');
+      try { var r = await DQ.call('lookup', cred); appt = r; detail(); }
+      catch (err) { form(esc(err.message)); }
+    });
+  }
+
+  function detail() {
+    var a = appt.appt;
+    root.innerHTML = '<div class="layout"><div class="card"><div class="row between wrap"><h2>นัดหมายของคุณ</h2>' + DQ.statusPill(a.status) + '</div>' +
+      '<div class="slip" style="box-shadow:none;margin-top:14px"><div class="slip-top" style="padding:16px 20px"><div class="no" style="margin:0">' + esc(a.apptNo) + '</div></div><div class="slip-body">' +
+      r('ชื่อ–นามสกุล', esc(a.title + a.firstName + ' ' + a.lastName)) + r('วันที่นัด', thai(a.date, { full: true })) + r('เวลา', a.time + ' น.') + r('ประเภทการรักษา', esc(a.treatment)) + r('สิทธิการรักษา', esc(a.rights)) + '</div><div style="height:8px"></div></div>' +
+      (appt.canReschedule ? '<div class="actions"><button class="btn" id="out">ย้อนกลับ</button><button class="btn primary" id="rs">' + ic('calendar', 18) + 'เลื่อนนัด</button></div>' :
+        '<div class="notice ' + (appt.canBookNext ? 'ok' : 'warn') + ' mt">' + ic('info') + '<span>' + (appt.canBookNext ? 'การรักษาเสร็จสิ้นแล้ว หากทันตแพทย์แจ้งให้นัดครั้งถัดไป ท่านสามารถจองได้เอง' : esc(appt.reason) + ' ' + (appt.reason.indexOf('ติดต่อ') < 0 ? '' : contactLine())) + '</span></div>' +
+        '<div class="actions"><button class="btn" id="out">ย้อนกลับ</button>' + (appt.canBookNext ? '<button class="btn primary" id="nx">จองนัดครั้งถัดไป ' + ic('chevR', 18) + '</button>' : '') + '</div>') +
+      '</div></div>';
+    function r(k, v) { return '<div class="slip-row"><span>' + k + '</span><b>' + v + '</b></div>'; }
+    $('#out', root).onclick = function () { cred = null; form(); };
+    if ($('#rs', root)) $('#rs', root).onclick = resched;
+    if ($('#nx', root)) $('#nx', root).onclick = function () {
+      switchTab('book'); Book.startNext({ title: a.title, firstName: a.firstName, lastName: a.lastName, age: String(a.age), phone: a.phone, rights: a.rights, consent: true });
+    };
+  }
+
+  function resched() {
+    var a = appt.appt, tid = trId(a.treatment); pick = {};
+    root.innerHTML = '<div class="card"><div class="panel-title"><h2>เลือกวัน–เวลาใหม่</h2><p>นัดเดิม: ' + thai(a.date, { shortDay: true }) + ' ' + a.time + ' น.</p></div>' +
+      '<div class="notice">' + ic('info') + '<span>ระบบจะจองนัดใหม่ให้สำเร็จก่อน แล้วจึงยกเลิกนัดเดิมอัตโนมัติ หากวัน–เวลาที่เลือกเต็ม นัดเดิมของท่านจะยังอยู่เหมือนเดิม</span></div>' +
+      '<div class="mt" id="pick"></div><div id="rsum"></div><div id="rerr"></div>' +
+      '<div class="actions"><button class="btn" id="bk">' + ic('chevL', 18) + 'ย้อนกลับ</button><button class="btn primary" id="go" disabled>ยืนยันเลื่อนนัด</button></div></div>';
+    var rid = DQ.uuid();
+    picker = createPicker($('#pick', root), {
+      treatment: function () { return tid; }, excludeNo: function () { return a.apptNo; },
+      onChange: function (v) {
+        pick = v; rid = DQ.uuid(); $('#go', root).disabled = !(v.date && v.time);
+        $('#rsum', root).innerHTML = v.date && v.time ? '<div class="confirm-line mt">เลื่อนนัดจาก <b>' + thai(a.date) + ' ' + a.time + ' น.</b><br>เป็น <b>' + thai(v.date) + ' ' + v.time + ' น.</b></div>' : '';
+      }
+    });
+    picker.mount();
+    $('#bk', root).onclick = detail;
+    $('#go', root).onclick = async function () {
+      var b = $('#go', root); DQ.busy(b, true, 'กำลังเลื่อนนัด…'); $('#rerr', root).innerHTML = '';
+      try {
+        var r = await DQ.call('reschedule', Object.assign({}, cred, { date: pick.date, time: pick.time }), { requestId: rid });
+        root.innerHTML = '<div class="notice ok" style="max-width:460px;margin:0 auto 14px">' + ic('check') + '<span>เลื่อนนัดสำเร็จ — นัดเดิม ' + esc(a.apptNo) + ' ถูกยกเลิกแล้ว กรุณาเก็บใบนัดและรหัสยืนยันใหม่นี้</span></div>' + slipHtml(r.appt, r.pin, { title: 'เลื่อนนัดสำเร็จ' });
+        bindSlip(root, r.appt, function () { cred = null; form(); });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } catch (e) {
+        DQ.busy(b, false);
+        $('#rerr', root).innerHTML = '<div class="notice bad mt">' + ic('alert') + '<span>' + esc(e.message) + '<br><b>นัดเดิมของท่านยังคงอยู่</b></span></div>';
+        if (['SLOT_TAKEN', 'CLOSED', 'OUT_OF_WINDOW', 'NOT_OPEN', 'PAST'].indexOf(e.code) >= 0) picker.refresh();
+      }
+    };
+  }
+  return { render: function () { if (!appt || !cred) form(); } , form: form };
+})();
+
+/* =============================== แท็บ / เริ่มต้น =============================== */
+function switchTab(t) {
+  var b = t === 'book';
+  $('#view-book').hidden = !b; $('#view-manage').hidden = b;
+  $('#tab-book').setAttribute('aria-selected', b); $('#tab-manage').setAttribute('aria-selected', !b);
+  if (!b) Manage.render();
+  history.replaceState(null, '', b ? location.pathname : '#manage');
+}
+$('#tab-book').onclick = function () { switchTab('book'); };
+$('#tab-manage').onclick = function () { switchTab('manage'); };
+
+(async function init() {
+  DQ.demoBanner();
+  $('#brandName').textContent = DQ.CFG.CLINIC_NAME || 'งานทันตกรรม';
+  $('#brandSub').textContent = DQ.CFG.HOSPITAL_NAME || 'ระบบนัดหมายออนไลน์';
+  document.title = 'จองคิวทำฟันออนไลน์ — ' + (DQ.CFG.HOSPITAL_NAME || DQ.CFG.CLINIC_NAME || '');
+  $('#view-book').innerHTML = '<div class="skeleton" style="height:320px"></div>';
+  try { cfg = await DQ.call('getConfig'); }
+  catch (e) { $('#view-book').innerHTML = '<div class="notice bad">' + ic('alert') + '<span>' + esc(e.message) + ' <button class="btn sm" onclick="location.reload()">โหลดใหม่</button></span></div>'; return; }
+  $('#chips').innerHTML =
+    '<span class="chip">' + ic('clock', 16) + '<b>จองออนไลน์</b> ช่วงเช้า 09:00–11:30 น. (จ.–ศ.)</span>' +
+    '<span class="chip">' + ic('calendar', 16) + 'จองล่วงหน้าได้ถึง <b>' + thai(cfg.maxDate, { noDay: true }) + '</b></span>' +
+    '<span class="chip">' + ic('alert', 16) + 'ปวดฟันรุนแรง/ฉุกเฉิน Walk-in <b>08:00–09:00 น.</b></span>' +
+    (cfg.notice ? '<span class="chip"><b>' + esc(cfg.notice) + '</b></span>' : '');
+  Book.render();
+  if (location.hash === '#manage') switchTab('manage');
+})();
+})();
+</script>
+</body>
+</html>

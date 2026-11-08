@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d9488">
+<meta name="robots" content="noindex,nofollow">
+<title>ระบบหลังบ้าน — จัดการนัดทำฟัน</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app"></div>
+<dialog id="dlg" aria-modal="true"></dialog>
+
+<script src="engine.js"></script>
+<script src="config.js"></script>
+<script src="api.js"></script>
+<script>
+(function () {
+'use strict';
+const $ = (s, r) => (r || document).querySelector(s);
+const { esc, ic, thaiDate: thai, call, toast } = DQ;
+const U = DQ.util;
+const app = $('#app'), dlg = $('#dlg');
+const A = { view: 'schedule', date: null, opts: null, day: null, name: '', entered: false };
+const NAV = [['schedule', 'ตารางนัด', 'calendar'], ['patients', 'ผู้ป่วย', 'users'], ['closures', 'วันปิด', 'ban'], ['settings', 'ตั้งค่า', 'settings'], ['audit', 'ประวัติ', 'history']];
+const ACTION_TH = { create: 'สร้างนัด', edit: 'แก้ไขข้อมูล', move: 'เปลี่ยนวัน/เวลา', status: 'เปลี่ยนสถานะ', reschedule: 'เลื่อนนัด (ผู้ป่วย)', closure_add: 'ปิดวัน', closure_remove: 'เปิดวัน', settings: 'ตั้งค่า', login: 'เข้าสู่ระบบ' };
+const FIELD_TH = { title: 'คำนำหน้า', firstName: 'ชื่อ', lastName: 'นามสกุล', age: 'อายุ', phone: 'เบอร์โทร', rights: 'สิทธิ', treatment: 'การรักษา', note: 'หมายเหตุ', from: 'จาก', to: 'เป็น', reason: 'เหตุผล', date: 'วันที่', time: 'เวลา', source: 'ช่องทาง', session: 'ช่วง', affected: 'ผู้ป่วยที่ได้รับผลกระทบ', dates: 'วันที่', newApptNo: 'นัดใหม่', durationMin: 'นาที' };
+const STATUS_ORDER = ['waiting', 'treating', 'done', 'cancelled', 'noshow'];
+const GROUP_TH = { fill: 'อุดฟัน', scale_extract: 'ขูดหินปูน / ถอนฟัน' };
+const SRC_TH = { online: 'จองออนไลน์', admin: 'เจ้าหน้าที่', walkin: 'Walk-in' };
+const isFree = a => a.status === 'cancelled' || a.status === 'noshow';
+const fmtPhone = p => { p = String(p || ''); return p.length === 10 ? `${p.slice(0, 3)}-${p.slice(3, 6)}-${p.slice(6)}` : p; };
+const fullName = a => `${a.title}${a.firstName} ${a.lastName}`;
+const tomin = t => { const p = t.split(':'); return +p[0] * 60 + +p[1]; };
+
+/* ======================= Dialog ======================= */
+function openDlg(title, body, foot) {
+  dlg.innerHTML = `<div class="modal-h"><h3>${title}</h3><button class="icon-btn" data-close aria-label="ปิด">${ic('x')}</button></div><div class="modal-b">${body}${foot ? `<div class="modal-f">${foot}</div>` : ''}</div>`;
+  if (!dlg.open) dlg.showModal();
+  return dlg;
+}
+dlg.addEventListener('click', e => { if (e.target === dlg || e.target.closest('[data-close]')) dlg.close(); });
+const closeDlg = () => { if (dlg.open) dlg.close(); };
+
+/* ======================= Login / Shell ======================= */
+function showLogin(msg) {
+  A.entered = false; closeDlg();
+  app.innerHTML = `<div class="login-wrap"><form class="card login-card" id="lf" novalidate>
+    <div class="row" style="margin-bottom:18px"><span class="logo"><svg viewBox="0 0 24 24" fill="currentColor"><path d="${'M12 2.5c-2 0-3.2 1-5 1-2.2 0-3.5 1.7-3.5 4.2 0 2.2 1 3.7 1.6 6 .6 2.3.8 7.3 2.9 7.3 1.6 0 1.4-4.2 4-4.2s2.4 4.2 4 4.2c2.1 0 2.3-5 2.9-7.3.6-2.3 1.6-3.8 1.6-6 0-2.5-1.3-4.2-3.5-4.2-1.8 0-3-1-5-1z'}"/></svg></span>
+    <div><h1 style="font-size:1.25rem">ระบบหลังบ้าน</h1><span class="muted small">เฉพาะเจ้าหน้าที่ที่ได้รับอนุญาต</span></div></div>
+    ${msg ? `<div class="notice bad" style="margin-bottom:14px">${ic('alert')}<span>${esc(msg)}</span></div>` : ''}
+    <div class="field"><label for="u">ชื่อผู้ใช้</label><input class="input" id="u" autocomplete="username" autocapitalize="off" required></div>
+    <div class="field mt"><label for="p">รหัสผ่าน</label><input class="input" id="p" type="password" autocomplete="current-password" required></div>
+    <button class="btn primary block mt-l" type="submit">${ic('lock', 18)}เข้าสู่ระบบ</button>
+    ${DQ.DEMO ? '<p class="xs muted mt" style="text-align:center">โหมดสาธิต: admin / admin1234</p>' : ''}
+    <p class="xs muted mt" style="text-align:center"><a href="./">← กลับหน้าจองของผู้ป่วย</a></p></form></div>`;
+  $('#u').focus();
+  $('#lf').addEventListener('submit', async e => {
+    e.preventDefault(); const b = $('button[type=submit]', app);
+    DQ.busy(b, true, 'กำลังเข้าสู่ระบบ…');
+    try {
+      const r = await call('adminLogin', { username: $('#u').value, password: $('#p').value });
+      DQ.setToken(r.token); A.name = r.name; enter();
+    } catch (err) { DQ.busy(b, false); showLogin(err.message); }
+  });
+}
+window.addEventListener('dq:auth', () => { if (A.entered) showLogin('หมดเวลาการเข้าสู่ระบบ กรุณาเข้าสู่ระบบอีกครั้ง'); });
+
+async function enter() {
+  try { A.opts = await call('adminOptions'); } catch (e) { return showLogin(e.message); }
+  A.entered = true; A.date = A.opts.today;
+  const nav = cls => NAV.map(([k, t, i]) => `<button class="nav-i" data-nav="${k}">${ic(i)}<span>${t}</span></button>`).join('');
+  app.innerHTML = `<div class="shell"><aside class="side">
+      <div class="brand" style="padding:4px 8px 16px"><span class="logo"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5c-2 0-3.2 1-5 1-2.2 0-3.5 1.7-3.5 4.2 0 2.2 1 3.7 1.6 6 .6 2.3.8 7.3 2.9 7.3 1.6 0 1.4-4.2 4-4.2s2.4 4.2 4 4.2c2.1 0 2.3-5 2.9-7.3.6-2.3 1.6-3.8 1.6-6 0-2.5-1.3-4.2-3.5-4.2-1.8 0-3-1-5-1z"/></svg></span><div><b>หลังบ้าน</b><span>${esc(A.opts.clinicName)}</span></div></div>
+      ${nav()}<div style="flex:1"></div>
+      <div class="small muted" style="padding:8px 14px">${ic('user', 16)} ${esc(A.name)}</div>
+      <button class="nav-i" data-act="logout">${ic('logout')}<span>ออกจากระบบ</span></button></aside>
+    <div><div class="topbar" style="position:static"><div class="container" style="max-width:none;padding:0 16px;min-height:54px"><span class="small muted">${ic('user', 16)} ${esc(A.name)}</span><span class="spacer"></span><a class="btn sm ghost" href="./" target="_blank" rel="noopener">หน้าผู้ป่วย</a><button class="btn sm ghost" data-act="logout">${ic('logout', 16)}ออก</button></div></div>
+    <main class="main" id="main"></main></div></div>
+    <nav class="bottom" aria-label="เมนูหลัก">${nav()}</nav>`;
+  go(A.view);
+}
+app.addEventListener('click', e => {
+  const n = e.target.closest('[data-nav]'); if (n) return go(n.dataset.nav);
+  if (e.target.closest('[data-act="logout"]')) { call('adminLogout').catch(() => {}); DQ.setToken(''); showLogin(); }
+});
+function go(v) {
+  A.view = v;
+  document.querySelectorAll('[data-nav]').forEach(b => { if (b.dataset.nav === v) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+  ({ schedule: viewSchedule, patients: viewPatients, closures: viewClosures, settings: viewSettings, audit: viewAudit })[v]();
+  window.scrollTo(0, 0);
+}
+const main = () => $('#main');
+const loading = () => { main().innerHTML = '<div class="skeleton" style="height:120px"></div><div class="skeleton mt" style="height:300px"></div>'; };
+const failBox = (e, retry) => { main().innerHTML = `<div class="notice bad">${ic('alert')}<span>${esc(e.message)} <button class="btn sm" id="retry">ลองใหม่</button></span></div>`; $('#retry').onclick = retry; };
+
+/* ======================= ตารางนัด ======================= */
+async function viewSchedule() {
+  loading();
+  try { A.day = await call('adminSchedule', { date: A.date }); } catch (e) { return failBox(e, viewSchedule); }
+  const d = A.day, appts = d.appts;
+  const am = appts.filter(a => a.session === 'AM'), pm = appts.filter(a => a.session === 'PM'), wk = appts.filter(a => a.session === 'WALKIN');
+  const slotAppt = t => am.find(a => a.time === t && !isFree(a));
+  const inactive = appts.filter(isFree);
+  const isToday = d.date === d.today;
+
+  const stats = STATUS_ORDER.map(s => `<div class="stat ${DQ.STATUS[s].cls}"><b>${d.counts[s]}</b><span>${DQ.STATUS[s].th}</span></div>`).join('');
+  const stale = d.stale.length ? `<div class="banner warn">${ic('alert', 22)}<div><b>มีนัดของวันก่อนหน้าที่ยังไม่ปิดสถานะ ${d.stale.length} รายการ</b><div class="small">ผู้ป่วยกลุ่มนี้จะจองออนไลน์ใหม่ไม่ได้จนกว่าจะเปลี่ยนสถานะเป็น เสร็จสิ้น / ไม่มาตามนัด / ยกเลิก</div>
+    <div class="mt-s" style="display:flex;flex-wrap:wrap;gap:6px">${d.stale.slice(0, 8).map(a => `<button class="btn sm" data-goto="${a.date}">${thai(a.date, { shortDay: true, noYear: true })} · ${esc(a.firstName)} ${esc(a.lastName)}</button>`).join('')}</div></div></div>` : '';
+  const closed = d.closure ? `<div class="banner bad">${ic('ban', 22)}<div class="grow"><b>วันนี้ปิดให้บริการ</b> — ${esc(d.closure.reason)}${appts.some(a => !isFree(a) && a.session !== 'WALKIN') ? '<div class="small">มีผู้ป่วยที่จองไว้ก่อนปิดวัน ระบบไม่ยกเลิกให้อัตโนมัติ กรุณาติดต่อผู้ป่วยเพื่อเลื่อน/ยกเลิก</div>' : ''}</div><button class="btn sm" data-act="reopen" data-d="${d.date}">เปิดวันนี้อีกครั้ง</button></div>` : '';
+
+  /* ช่วงเช้า */
+  let amHtml;
+  if (!d.openAM) amHtml = `<div class="notice">${ic('info')}<span>${U.dow(d.date) === 0 || U.dow(d.date) === 6 ? 'วันเสาร์–อาทิตย์ไม่เปิดให้บริการ' : 'วันนี้ไม่เปิดให้บริการช่วงเช้า'}</span></div>`;
+  else amHtml = '<div class="list">' + d.slots.map(s => {
+    const a = slotAppt(s.time);
+    return `<div class="slot-row"><div class="slot-time">${s.time}<small>${s.group === 'fill' ? 'อุดฟัน' : 'ขูด/ถอน'}</small></div>` +
+      (a ? card(a) : `<div class="empty-slot"><span>ว่าง — เปิดรับ ${GROUP_TH[s.group] || ''}</span><button class="btn sm" data-add="AM" data-time="${s.time}">${ic('plus', 16)}เพิ่มนัด</button></div>`) + '</div>';
+  }).join('') + '</div>';
+
+  /* ช่วงบ่าย */
+  const pmAct = pm.filter(a => !isFree(a)).sort((a, b) => a.time < b.time ? -1 : 1);
+  const s0 = tomin(d.pmStart), s1 = tomin(d.pmEnd), span = s1 - s0;
+  let pmHtml;
+  if (!d.openPM) pmHtml = `<div class="notice">${ic('info')}<span>${U.dow(d.date) === 5 ? 'วันศุกร์ปิดให้บริการช่วงบ่าย' : 'วันนี้ไม่มีนัดช่วงบ่าย'}</span></div>`;
+  else {
+    const ticks = []; for (let m = s0; m <= s1; m += 30) ticks.push(`${('0' + Math.floor(m / 60)).slice(-2)}:${('0' + m % 60).slice(-2)}`);
+    pmHtml = `<div class="tl" aria-hidden="true">${pmAct.map(a => `<i style="left:${(tomin(a.time) - s0) / span * 100}%;width:${(tomin(a.endTime) - tomin(a.time)) / span * 100}%"></i>`).join('')}</div><div class="tl-scale">${ticks.map(t => `<span>${t}</span>`).join('')}</div>` +
+      `<div class="list">${pmAct.length ? pmAct.map(a => `<div class="slot-row"><div class="slot-time">${a.time}<small>ถึง ${a.endTime}</small></div>${card(a)}</div>`).join('') : '<div class="empty-slot"><span>ยังไม่มีนัดช่วงบ่าย</span></div>'}</div>`;
+  }
+
+  main().innerHTML = `
+    <div class="adm-top"><h1>ตารางนัดหมาย</h1>
+      <div class="date-nav"><button class="icon-btn" data-day="-1" aria-label="วันก่อนหน้า">${ic('chevL')}</button>
+      <input class="input" type="date" id="dpick" value="${d.date}" aria-label="เลือกวันที่"><button class="icon-btn" data-day="1" aria-label="วันถัดไป">${ic('chevR')}</button>
+      <button class="btn sm" data-day="0"${isToday ? ' disabled' : ''}>วันนี้</button></div></div>
+    <p class="muted" style="margin:-6px 0 14px"><b style="color:var(--ink)">${thai(d.date, { full: true })}</b>${isToday ? ' · วันนี้' : ''}</p>
+    ${stale}${closed}<div class="stats">${stats}</div>
+    <section class="sec"><div class="sec-h"><h2>ช่วงเช้า <small>09:00–11:30 น. · จองออนไลน์ได้</small></h2></div>${amHtml}</section>
+    <section class="sec"><div class="sec-h"><h2>ช่วงบ่าย <small>${esc(d.pmStart)}–${esc(d.pmEnd)} น. · เจ้าหน้าที่/ทันตแพทย์กำหนด</small></h2>${d.openPM && !d.closure ? `<button class="btn sm primary" data-add="PM">${ic('plus', 16)}เพิ่มนัดช่วงบ่าย</button>` : ''}</div>${pmHtml}</section>
+    <section class="sec"><div class="sec-h"><h2>Walk-in <small>${esc(d.walkinStart)}–${esc(d.walkinEnd)} น. · ฉุกเฉิน/ปวดฟันรุนแรง</small></h2>${d.openAM ? `<button class="btn sm" data-add="WALKIN">${ic('plus', 16)}บันทึก Walk-in</button>` : ''}</div>
+      <div class="list">${wk.length ? wk.map(card).join('') : '<div class="empty-slot"><span>ยังไม่มีรายการ Walk-in</span></div>'}</div></section>
+    ${inactive.length ? `<section class="sec"><div class="sec-h"><h2>ยกเลิก / ไม่มาตามนัด <small>${inactive.length} รายการ · คิวถูกคืนให้ระบบแล้ว</small></h2></div><div class="list">${inactive.map(card).join('')}</div></section>` : ''}`;
+}
+
+function card(a) {
+  const sb = STATUS_ORDER.map(s => `<button class="sb ${DQ.STATUS[s].cls}${a.status === s ? ' on' : ''}" data-st="${s}" data-no="${a.apptNo}" aria-pressed="${a.status === s}">${DQ.STATUS[s].th}</button>`).join('');
+  return `<article class="appt ${DQ.STATUS[a.status].cls}" data-no="${a.apptNo}">
+    <div class="row between wrap"><span class="nm">${esc(fullName(a))} <span class="muted small" style="font-weight:400">· ${esc(a.age)} ปี</span></span>${DQ.statusPill(a.status)}</div>
+    <div class="meta"><span>${ic('phone', 14)} <a href="tel:${esc(a.phone)}">${fmtPhone(a.phone)}</a></span><span>${ic('tooth', 14)} ${esc(a.treatment)}</span><span>${ic('shield', 14)} ${esc(a.rights)}</span>
+      ${a.session === 'PM' ? `<span>${ic('clock', 14)} ${a.time}–${a.endTime} (${a.durationMin} นาที)</span>` : ''}<span class="num">${esc(a.apptNo)}</span><span>${SRC_TH[a.source] || ''}</span></div>
+    ${a.note ? `<div class="small muted">หมายเหตุ: ${esc(a.note)}</div>` : ''}
+    <div class="statusbar" role="group" aria-label="เปลี่ยนสถานะ">${sb}</div>
+    <div class="tools"><button class="btn sm" data-edit="${a.apptNo}">${ic('edit', 15)}แก้ไข</button>${a.session !== 'WALKIN' && !isFree(a) ? `<button class="btn sm" data-move="${a.apptNo}">${ic('move', 15)}เปลี่ยนวัน/เวลา</button>` : ''}<button class="btn sm ghost" data-hist="${a.apptNo}">${ic('history', 15)}ประวัติผู้ป่วย</button></div></article>`;
+}
+
+/* ---- เหตุการณ์ในหน้าตารางนัด ---- */
+document.addEventListener('click', async e => {
+  if (!A.entered) return;
+  const t = e.target;
+  let b;
+  if ((b = t.closest('[data-day]'))) { const n = +b.dataset.day; A.date = n === 0 ? A.opts.today : U.addDays(A.date, n); return viewSchedule(); }
+  if ((b = t.closest('[data-goto]'))) { A.date = b.dataset.goto; return viewSchedule(); }
+  if ((b = t.closest('[data-add]'))) return openCreate(b.dataset.add, A.date, b.dataset.time);
+  if ((b = t.closest('[data-edit]'))) return openEdit(find(b.dataset.edit));
+  if ((b = t.closest('[data-move]'))) return openMove(find(b.dataset.move));
+  if ((b = t.closest('[data-hist]'))) { const a = find(b.dataset.hist); return openHistory(a); }
+  if ((b = t.closest('[data-st]'))) return changeStatus(b.dataset.no, b.dataset.st);
+  if ((b = t.closest('[data-act="reopen"]'))) {
+    try { await call('adminRemoveClosure', { date: b.dataset.d }); toast('เปิดวันให้บริการแล้ว', 'ok'); refresh(); } catch (err) { toast(err.message, 'err'); }
+  }
+});
+document.addEventListener('change', e => { if (A.entered && e.target.id === 'dpick' && e.target.value) { A.date = e.target.value; viewSchedule(); } });
+const find = no => (A.day && (A.day.appts.concat(A.day.stale)).find(a => a.apptNo === no)) || A.hist && A.hist.find(a => a.apptNo === no);
+const refresh = () => { if (A.view === 'schedule') viewSchedule(); else if (A.view === 'closures') viewClosures(); };
+
+async function changeStatus(no, st) {
+  const a = find(no); if (!a || a.status === st) return;
+  if (st === 'cancelled' || st === 'noshow') {
+    const label = DQ.STATUS[st].th;
+    openDlg(`${label} — ${esc(fullName(a))}`,
+      `<p class="small muted">${st === 'noshow' ? 'ผู้ป่วยที่ไม่มาตามนัดสามารถจองใหม่ได้ทันที ระบบจะเก็บประวัติไว้ให้ตรวจสอบ' : 'เมื่อยกเลิก คิวนี้จะถูกคืนให้ระบบและเปิดให้จองใหม่ได้ (ไม่ลบข้อมูลนัดเดิม)'}</p>
+       <div class="field mt"><label for="rs">เหตุผล / หมายเหตุ (ไม่บังคับ)</label><textarea class="input" id="rs" rows="2" maxlength="120"></textarea></div><div id="derr"></div>`,
+      `<button class="btn" data-close>ปิด</button><button class="btn ${st === 'cancelled' ? 'danger' : 'primary'}" id="ok">ยืนยัน ${label}</button>`);
+    $('#ok').onclick = async function () {
+      DQ.busy(this, true);
+      try { await call('adminSetStatus', { apptNo: no, status: st, reason: $('#rs').value }, { requestId: DQ.uuid() }); closeDlg(); toast(`บันทึกสถานะ “${label}” แล้ว`, 'ok'); refresh(); }
+      catch (err) { DQ.busy(this, false); $('#derr').innerHTML = `<div class="notice bad mt">${esc(err.message)}</div>`; }
+    };
+    return;
+  }
+  try { await call('adminSetStatus', { apptNo: no, status: st }, { requestId: DQ.uuid() }); toast(`เปลี่ยนเป็น “${DQ.STATUS[st].th}” แล้ว`, 'ok'); refresh(); }
+  catch (err) { toast(err.message, 'err'); }
+}
+
+/* ======================= ฟอร์มนัดหมาย ======================= */
+const optList = (arr, sel) => arr.map(x => `<option${x === sel ? ' selected' : ''}>${esc(x)}</option>`).join('');
+function personFields(v) {
+  v = v || {};
+  return `<div class="grid2"><div class="field"><label for="f-title">คำนำหน้า</label><select class="input" id="f-title">${optList(A.opts.titles, v.title || 'นาย')}</select></div>
+    <div class="field"><label for="f-age">อายุ</label><input class="input" id="f-age" inputmode="numeric" maxlength="3" value="${esc(v.age || '')}"></div>
+    <div class="field"><label for="f-first">ชื่อ</label><input class="input" id="f-first" maxlength="60" value="${esc(v.firstName || '')}"></div>
+    <div class="field"><label for="f-last">นามสกุล</label><input class="input" id="f-last" maxlength="60" value="${esc(v.lastName || '')}"></div></div>
+    <div class="grid2 mt"><div class="field"><label for="f-phone">เบอร์โทรศัพท์</label><input class="input num" id="f-phone" type="tel" inputmode="numeric" maxlength="12" value="${esc(v.phone || '')}"></div>
+    <div class="field"><label for="f-rights">สิทธิการรักษา</label><select class="input" id="f-rights">${optList(A.opts.rights, v.rights)}</select></div></div>`;
+}
+const readPerson = () => ({ title: $('#f-title').value, age: $('#f-age').value.trim(), firstName: $('#f-first').value, lastName: $('#f-last').value, phone: $('#f-phone').value.replace(/[\s-]/g, ''), rights: $('#f-rights').value });
+const amTreatments = () => A.opts.treatments.map(t => t.name);
+const allTreatments = () => amTreatments().concat(A.opts.adminTreatments.map(t => t.name));
+const groupOf = name => (A.opts.treatments.find(t => t.name === name) || {}).group;
+
+function amTimeSelect(dayAppts, treat, selected, selfNo) {
+  const g = groupOf(treat);
+  return A.opts.amSlots.filter(s => s.group === g).map(s => {
+    const busy = dayAppts.some(a => a.session === 'AM' && a.time === s.time && !isFree(a) && a.apptNo !== selfNo);
+    return `<option value="${s.time}"${s.time === selected ? ' selected' : ''}${busy ? ' disabled' : ''}>${s.time} น.${busy ? ' (ไม่ว่าง)' : ''}</option>`;
+  }).join('');
+}
+async function dayAppts(date) { try { return (await call('adminSchedule', { date })).appts; } catch (e) { return []; } }
+
+async function openCreate(session, date, time) {
+  const O = A.opts, title = { AM: 'เพิ่มนัดช่วงเช้า', PM: 'เพิ่มนัดช่วงบ่าย', WALKIN: 'บันทึก Walk-in' }[session];
+  let cur = A.day.appts, curDate = date;
+  const slotGroup = (O.amSlots.find(s => s.time === time) || {}).group;
+  const defTreat = session === 'AM' ? (slotGroup === 'scale_extract' ? 'ขูดหินปูน' : 'อุดฟัน') : session === 'PM' ? 'ผ่าฟันคุด' : 'ปวดฟันรุนแรง';
+  const timeField = session === 'AM'
+    ? `<div class="field"><label for="f-time">เวลา</label><select class="input" id="f-time"></select></div>`
+    : session === 'PM'
+      ? `<div class="field"><label for="f-time">เวลาเริ่ม (${O.pmStart}–${O.pmEnd})</label><input class="input" id="f-time" type="time" step="300" min="${O.pmStart}" max="${O.pmEnd}" value="${O.pmStart}"></div>`
+      : `<div class="field"><label for="f-time">เวลา (08:00–08:59)</label><input class="input" id="f-time" type="time" min="08:00" max="08:59" value="08:00"></div>`;
+  const treatField = session === 'WALKIN'
+    ? `<div class="field"><label for="f-treat">อาการ / การรักษา</label><input class="input" id="f-treat" list="tl" value="${esc(defTreat)}" maxlength="80"><datalist id="tl">${['ปวดฟันรุนแรง', 'ฟันบวม', 'อุบัติเหตุ/ฟันแตก', ...allTreatments()].map(x => `<option>${esc(x)}</option>`).join('')}</datalist></div>`
+    : `<div class="field"><label for="f-treat">ประเภทการรักษา</label><select class="input" id="f-treat">${optList(session === 'AM' ? amTreatments() : allTreatments(), defTreat)}</select></div>`;
+  openDlg(title, `<form id="cf" novalidate>${personFields()}
+    <div class="grid2 mt">${treatField}<div class="field"><label for="f-date">วันที่</label><input class="input" id="f-date" type="date" value="${date}"></div></div>
+    <div class="grid2 mt">${timeField}${session === 'PM' ? `<div class="field"><label for="f-dur">ระยะเวลา (นาที)</label><input class="input" id="f-dur" type="number" min="15" max="120" step="5" value="90"></div>` : session === 'WALKIN' ? `<div class="field"><label for="f-status">สถานะ</label><select class="input" id="f-status">${STATUS_ORDER.map(s => `<option value="${s}"${s === 'waiting' ? ' selected' : ''}>${DQ.STATUS[s].th}</option>`).join('')}</select></div>` : '<div></div>'}</div>
+    <div class="field mt"><label for="f-note">หมายเหตุ</label><input class="input" id="f-note" maxlength="300"></div><div id="derr"></div></form>`,
+    `<button class="btn" data-close>ยกเลิก</button><button class="btn primary" id="ok">${ic('check', 18)}บันทึกนัด</button>`);
+  const fillTimes = () => { if (session !== 'AM') return; const sel = $('#f-time'); const keep = sel.value || time; sel.innerHTML = amTimeSelect(cur, $('#f-treat').value, keep); };
+  const fillDur = () => { if (session !== 'PM') return; const t = O.adminTreatments.find(x => x.name === $('#f-treat').value); $('#f-dur').value = t ? t.minutes : 30; };
+  fillTimes(); fillDur();
+  $('#f-treat').addEventListener('change', () => { fillTimes(); fillDur(); });
+  $('#f-date').addEventListener('change', async e => { if (session === 'AM' && e.target.value) { cur = await dayAppts(e.target.value); fillTimes(); } });
+  $('#f-phone').addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 10); });
+  $('#ok').onclick = async function () {
+    const p = Object.assign(readPerson(), { session, treatment: $('#f-treat').value, date: $('#f-date').value, time: $('#f-time').value, note: $('#f-note').value });
+    if (session === 'PM') p.durationMin = $('#f-dur').value;
+    if (session === 'WALKIN') p.status = $('#f-status').value;
+    DQ.busy(this, true, 'กำลังบันทึก…');
+    try {
+      const r = await call('adminCreate', p, { requestId: DQ.uuid() });
+      closeDlg(); A.date = r.appt.date; refresh(); if (A.view !== 'schedule') go('schedule');
+      if (session === 'WALKIN') toast('บันทึก Walk-in แล้ว', 'ok');
+      else openDlg('สร้างนัดสำเร็จ', `<div class="notice ok">${ic('check')}<span>เลขที่นัด <b class="num">${esc(r.appt.apptNo)}</b> — ${thai(r.appt.date)} ${r.appt.time} น.</span></div>
+        <p class="mt small muted">รหัสยืนยันสำหรับผู้ป่วย (ใช้เลื่อนนัดผ่านเว็บ${session === 'PM' ? ' — นัดช่วงบ่ายให้เจ้าหน้าที่เลื่อนให้เท่านั้น' : ''}):</p>
+        <div class="slip-pin" style="margin:8px 0 0"><b>${esc(r.pin)}</b><small>แจ้งผู้ป่วยทางโทรศัพท์/เขียนลงบัตรนัด — ระบบจะไม่แสดงอีก</small></div>`, '<button class="btn primary" data-close>เรียบร้อย</button>');
+    } catch (err) { DQ.busy(this, false); $('#derr').innerHTML = `<div class="notice bad mt">${ic('alert')}<span>${esc(err.message)}</span></div>`; }
+  };
+}
+
+function openEdit(a) {
+  const list = a.session === 'AM' ? amTreatments() : allTreatments(); if (list.indexOf(a.treatment) < 0) list.push(a.treatment);
+  openDlg(`แก้ไขข้อมูล · ${esc(a.apptNo)}`, `<form novalidate>${personFields(a)}
+    <div class="field mt"><label for="f-treat">ประเภทการรักษา</label><select class="input" id="f-treat">${optList(list, a.treatment)}</select></div>
+    <div class="field mt"><label for="f-note">หมายเหตุ</label><input class="input" id="f-note" maxlength="300" value="${esc(a.note)}"></div>
+    <p class="xs muted mt">การเปลี่ยนวัน/เวลา ให้ใช้ปุ่ม “เปลี่ยนวัน/เวลา” ทุกการแก้ไขถูกบันทึกในประวัติพร้อมชื่อเจ้าหน้าที่</p><div id="derr"></div></form>`,
+    `<button class="btn" data-close>ยกเลิก</button><button class="btn primary" id="ok">บันทึก</button>`);
+  $('#f-phone').addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 10); });
+  $('#ok').onclick = async function () {
+    DQ.busy(this, true);
+    try { await call('adminUpdate', Object.assign(readPerson(), { apptNo: a.apptNo, treatment: $('#f-treat').value, note: $('#f-note').value }), { requestId: DQ.uuid() }); closeDlg(); toast('บันทึกการแก้ไขแล้ว', 'ok'); refresh(); }
+    catch (err) { DQ.busy(this, false); $('#derr').innerHTML = `<div class="notice bad mt">${ic('alert')}<span>${esc(err.message)}</span></div>`; }
+  };
+}
+
+async function openMove(a) {
+  const O = A.opts; let cur = await dayAppts(a.date);
+  openDlg(`เปลี่ยนวัน/เวลา · ${esc(a.apptNo)}`, `<p class="small muted">${esc(fullName(a))} — ปัจจุบัน ${thai(a.date, { shortDay: true })} ${a.time} น.</p>
+    <div class="grid2 mt"><div class="field"><label for="m-date">วันที่ใหม่</label><input class="input" id="m-date" type="date" value="${a.date}"></div>
+    ${a.session === 'AM' ? `<div class="field"><label for="m-time">เวลา</label><select class="input" id="m-time"></select></div>` : `<div class="field"><label for="m-time">เวลาเริ่ม</label><input class="input" id="m-time" type="time" step="300" min="${O.pmStart}" max="${O.pmEnd}" value="${a.time}"></div>`}</div>
+    ${a.session === 'PM' ? `<div class="field mt"><label for="m-dur">ระยะเวลา (นาที)</label><input class="input" id="m-dur" type="number" min="15" max="120" step="5" value="${a.durationMin}"></div>` : ''}
+    <div class="notice mt">${ic('info')}<span>ระบบตรวจสอบวันเปิดบริการ คิวว่าง และเวลาทับซ้อนให้อัตโนมัติ ประวัติเดิมถูกเก็บไว้ใน Log</span></div><div id="derr"></div>`,
+    `<button class="btn" data-close>ยกเลิก</button><button class="btn primary" id="ok">ย้ายนัด</button>`);
+  const fill = () => { if (a.session === 'AM') $('#m-time').innerHTML = amTimeSelect(cur, a.treatment, a.time, a.apptNo); };
+  fill();
+  $('#m-date').addEventListener('change', async e => { if (a.session === 'AM' && e.target.value) { cur = await dayAppts(e.target.value); fill(); } });
+  $('#ok').onclick = async function () {
+    DQ.busy(this, true);
+    try {
+      const r = await call('adminMove', { apptNo: a.apptNo, date: $('#m-date').value, time: $('#m-time').value, durationMin: a.session === 'PM' ? $('#m-dur').value : undefined }, { requestId: DQ.uuid() });
+      closeDlg(); toast('ย้ายนัดเรียบร้อย', 'ok'); A.date = r.appt.date; refresh();
+    } catch (err) { DQ.busy(this, false); $('#derr').innerHTML = `<div class="notice bad mt">${ic('alert')}<span>${esc(err.message)}</span></div>`; }
+  };
+}
+
+/* ======================= ประวัติผู้ป่วย ======================= */
+function fmtDetail(s) {
+  let o; try { o = JSON.parse(s); } catch (e) { return esc(s); }
+  if (!o || typeof o !== 'object') return esc(s);
+  return Object.keys(o).map(k => {
+    const v = o[k], lab = FIELD_TH[k] || (k === 'dates' ? 'วันที่' : k);
+    if (Array.isArray(v)) return `${lab}: ${esc(v[0])} → ${esc(v[1])}`;
+    if (k === 'to' && o.from && (o.from in DQ.STATUS)) return `${DQ.STATUS[o.from].th} → ${DQ.STATUS[v] ? DQ.STATUS[v].th : esc(v)}`;
+    if (k === 'from' && (v in DQ.STATUS)) return '';
+    return v === '' ? '' : `${lab}: ${esc(typeof v === 'object' ? JSON.stringify(v) : v)}`;
+  }).filter(Boolean).join(' · ');
+}
+async function openHistory(p) {
+  openDlg(`ประวัติผู้ป่วย`, '<div class="skeleton" style="height:160px"></div>');
+  try {
+    const r = await call('adminHistory', { phone: p.phone, firstName: p.firstName, lastName: p.lastName });
+    A.hist = r.appts;
+    const cnt = s => r.appts.filter(a => a.status === s).length;
+    $('.modal-b', dlg).innerHTML = `<div class="row"><span class="avatar">${esc((p.firstName || '?').charAt(0))}</span><div><b>${esc(fullName(p))}</b><div class="small muted">${fmtPhone(p.phone)} · ${r.appts.length} นัด · เสร็จสิ้น ${cnt('done')} · ไม่มา ${cnt('noshow')} · ยกเลิก ${cnt('cancelled')}</div></div></div>
+      <h4 class="mt-l" style="margin-bottom:10px">ประวัติการนัดหมาย</h4><div class="list">${r.appts.map(a => `<div class="appt ${DQ.STATUS[a.status].cls}"><div class="row between wrap"><b>${thai(a.date, { shortDay: true })} · ${a.time} น.</b>${DQ.statusPill(a.status)}</div><div class="meta"><span class="num">${esc(a.apptNo)}</span><span>${esc(a.treatment)}</span><span>${SRC_TH[a.source] || ''}</span>${a.rescheduledFrom ? `<span>เลื่อนมาจาก ${esc(a.rescheduledFrom)}</span>` : ''}${a.rescheduledTo ? `<span>เลื่อนไป ${esc(a.rescheduledTo)}</span>` : ''}</div>${a.note ? `<div class="small muted">${esc(a.note)}</div>` : ''}</div>`).join('')}</div>
+      <h4 class="mt-l" style="margin-bottom:10px">บันทึกการเปลี่ยนแปลง</h4><div class="tline">${r.audit.length ? r.audit.map(l => `<div><b class="small">${ACTION_TH[l.action] || esc(l.action)}</b> <span class="xs muted num">${esc(l.apptNo)}</span><div class="xs muted">${esc(l.time)} · ${esc(l.admin)}</div><div class="small">${fmtDetail(l.detail)}</div></div>`).join('') : '<p class="muted small">ไม่มีบันทึก</p>'}</div>
+      <div class="modal-f"><button class="btn" data-close>ปิด</button></div>`;
+  } catch (e) { $('.modal-b', dlg).innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; }
+}
+
+/* ======================= ค้นหาผู้ป่วย ======================= */
+function viewPatients() {
+  main().innerHTML = `<div class="adm-top"><h1>ค้นหาผู้ป่วย</h1></div>
+    <div class="field" style="max-width:560px"><label for="q" class="sr">ค้นหา</label><div style="position:relative"><span style="position:absolute;left:14px;top:13px;color:var(--ink3)">${ic('search')}</span><input class="input" id="q" style="padding-left:44px" placeholder="ชื่อ นามสกุล หรือเบอร์โทรศัพท์" autocomplete="off" inputmode="search"></div></div>
+    <div class="list mt" id="res"><p class="muted small">พิมพ์อย่างน้อย 2 ตัวอักษร (หรือเลขโทรศัพท์ 3 หลัก)</p></div>`;
+  let tm, seq = 0;
+  $('#q').addEventListener('input', e => {
+    clearTimeout(tm); const q = e.target.value;
+    tm = setTimeout(async () => {
+      const my = ++seq;
+      if (q.trim().length < 2) { $('#res').innerHTML = '<p class="muted small">พิมพ์อย่างน้อย 2 ตัวอักษร</p>'; return; }
+      try {
+        const r = await call('adminSearch', { q }); if (my !== seq) return;
+        $('#res').innerHTML = r.patients.length ? r.patients.map((p, i) => `<button class="pt" data-p="${i}"><span class="avatar">${esc(p.firstName.charAt(0))}</span><span class="grow"><b>${esc(fullName(p))}</b><br><span class="small muted">${fmtPhone(p.phone)} · ล่าสุด ${thai(p.last, { shortDay: true, noYear: false })}</span></span><span class="small muted nowrap">${p.total} นัด${p.noshow ? ` · ไม่มา ${p.noshow}` : ''}</span>${p.active ? '<span class="pill s-waiting">มีนัดค้าง</span>' : ''}</button>`).join('') : '<div class="notice">ไม่พบผู้ป่วย</div>';
+        A.found = r.patients;
+      } catch (err) { $('#res').innerHTML = `<div class="notice bad">${esc(err.message)}</div>`; }
+    }, 320);
+  });
+  $('#res').addEventListener('click', e => { const b = e.target.closest('[data-p]'); if (b) openHistory(A.found[+b.dataset.p]); });
+}
+
+/* ======================= วันปิดบริการ ======================= */
+async function viewClosures() {
+  loading();
+  let r; try { r = await call('adminClosures'); } catch (e) { return failBox(e, viewClosures); }
+  main().innerHTML = `<div class="adm-top"><h1>จัดการวันเปิด–ปิดให้บริการ</h1></div>
+    <div class="layout"><div class="card"><h3>ปิดวันให้บริการ</h3><p class="small muted mt-s">เช่น วันหยุดราชการ ทันตแพทย์/ผู้ช่วยลา ประชุม อบรม — ระบบจะไม่ยกเลิกนัดเดิมให้อัตโนมัติ</p>
+      <form id="cf" class="mt" novalidate><div class="grid2"><div class="field"><label for="c-from">ตั้งแต่วันที่</label><input class="input" type="date" id="c-from" value="${r.today}"></div><div class="field"><label for="c-to">ถึงวันที่ (ถ้าปิดหลายวัน)</label><input class="input" type="date" id="c-to"></div></div>
+      <div class="field mt"><label for="c-rs">เหตุผล</label><input class="input" id="c-rs" maxlength="120" placeholder="เช่น วันหยุดราชการ / ประชุม / ทันตแพทย์ลา"></div><div id="derr"></div>
+      <button class="btn primary mt" type="submit">${ic('ban', 18)}ปิดวัน</button></form></div>
+    <aside class="card"><h3>วันที่ปิดไว้</h3><div class="list mt" id="cl">${r.closures.length ? r.closures.map(c => `<div class="appt" style="border-left-color:var(--bad)"><div class="row between"><div><b>${thai(c.date, { shortDay: true })}</b><div class="small muted">${esc(c.reason)}</div></div>${c.date >= r.today ? `<button class="btn sm danger" data-rm="${c.date}">เปิดวัน</button>` : '<span class="xs muted">ผ่านมาแล้ว</span>'}</div></div>`).join('') : '<p class="muted small">ยังไม่มีวันปิด</p>'}</div></aside></div>`;
+  async function submit(confirm) {
+    const p = { from: $('#c-from').value, to: $('#c-to').value || $('#c-from').value, reason: $('#c-rs').value, confirm };
+    try {
+      const x = await call('adminAddClosure', p, { requestId: confirm ? DQ.uuid() : undefined });
+      if (x.needConfirm) return showAffected(x, p, false);
+      if (x.affected && x.affected.length) showAffected(x, p, true); else toast(`ปิดให้บริการ ${x.added} วันแล้ว`, 'ok');
+      viewClosures();
+    } catch (err) { $('#derr').innerHTML = `<div class="notice bad mt">${ic('alert')}<span>${esc(err.message)}</span></div>`; }
+  }
+  $('#cf').addEventListener('submit', e => { e.preventDefault(); submit(false); });
+  $('#cl').addEventListener('click', async e => {
+    const b = e.target.closest('[data-rm]'); if (!b) return;
+    try { await call('adminRemoveClosure', { date: b.dataset.rm }); toast('เปิดวันแล้ว', 'ok'); viewClosures(); } catch (err) { toast(err.message, 'err'); }
+  });
+  function showAffected(x, p, done) {
+    openDlg(done ? 'ปิดวันแล้ว — โปรดติดต่อผู้ป่วย' : 'มีผู้ป่วยได้รับผลกระทบ',
+      `<div class="banner warn">${ic('alert', 22)}<div><b>${x.affected.length} ราย</b> มีนัดในวันที่จะปิด<div class="small">ระบบ<b>ไม่ยกเลิกนัดให้อัตโนมัติ</b> กรุณาติดต่อผู้ป่วยเพื่อเลื่อนหรือยกเลิกนัดด้วยตนเอง</div></div></div>
+       <div class="list">${x.affected.map(a => `<div class="appt ${DQ.STATUS[a.status].cls}"><div class="row between wrap"><b>${esc(fullName(a))}</b><span class="small num">${thai(a.date, { shortDay: true, noYear: true })} ${a.time} น.</span></div><div class="meta"><span>${ic('phone', 14)} <a href="tel:${esc(a.phone)}">${fmtPhone(a.phone)}</a></span><span>${esc(a.treatment)}</span><span class="num">${esc(a.apptNo)}</span></div></div>`).join('')}</div>`,
+      done ? '<button class="btn primary" data-close>รับทราบ</button>' : '<button class="btn" data-close>ยกเลิก</button><button class="btn primary" id="ok">ยืนยันปิดวัน (ไม่ยกเลิกนัด)</button>');
+    if (!done) $('#ok').onclick = () => { closeDlg(); submit(true); };
+  }
+}
+
+/* ======================= ตั้งค่า ======================= */
+async function viewSettings() {
+  loading();
+  let s; try { s = (await call('adminGetSettings')).settings; } catch (e) { return failBox(e, viewSettings); }
+  main().innerHTML = `<div class="adm-top"><h1>ตั้งค่าระบบ</h1></div><form class="card" id="sf" style="max-width:720px" novalidate>
+    <h3>การเปิดรับจอง</h3><div class="grid2 mt">
+    <div class="field"><label for="s-win">เปิดจองล่วงหน้า (วัน)</label><input class="input" id="s-win" type="number" min="7" max="92" value="${esc(s.bookingWindowDays)}"><span class="xs muted">แนะนำ 30–60 วัน (1–2 เดือน)</span></div>
+    <div class="field"><label for="s-min">จองได้ตั้งแต่อีกกี่วัน</label><input class="input" id="s-min" type="number" min="0" max="30" value="${esc(s.minAdvanceDays)}"><span class="xs muted">1 = จองได้ตั้งแต่พรุ่งนี้</span></div>
+    <div class="field"><label for="s-rs">ผู้ป่วยเลื่อนนัดเองได้ก่อนวันนัด (วัน)</label><input class="input" id="s-rs" type="number" min="0" max="30" value="${esc(s.rescheduleMinDays)}"></div>
+    <div class="field"><label for="s-key">ใช้อะไรระบุว่าเป็นผู้ป่วยคนเดียวกัน</label><select class="input" id="s-key"><option value="phone_name"${s.patientKeyMode === 'phone_name' ? ' selected' : ''}>เบอร์โทร + ชื่อ–นามสกุล</option><option value="phone"${s.patientKeyMode === 'phone' ? ' selected' : ''}>เบอร์โทรอย่างเดียว (เข้มงวดสุด)</option></select></div></div>
+    <h3 class="mt-l">ข้อมูลที่แสดงให้ผู้ป่วย</h3><div class="grid2 mt">
+    <div class="field"><label for="s-name">ชื่อหน่วยงาน</label><input class="input" id="s-name" maxlength="80" value="${esc(s.clinicName)}"></div>
+    <div class="field"><label for="s-ph">เบอร์โทรติดต่อ</label><input class="input" id="s-ph" maxlength="40" value="${esc(s.clinicPhone)}"></div></div>
+    <div class="field mt"><label for="s-nt">ประกาศสั้น ๆ (แสดงหน้าแรก)</label><input class="input" id="s-nt" maxlength="200" value="${esc(s.notice)}" placeholder="เช่น ปิดให้บริการช่วงสงกรานต์"></div>
+    <h3 class="mt-l">ข้อมูลส่วนบุคคล</h3><div class="field mt" style="max-width:320px"><label for="s-ret">ระยะเวลาเก็บรักษา (วัน)</label><input class="input" id="s-ret" type="number" min="90" max="1095" value="${esc(s.retentionDays)}"><span class="xs muted">ค่าตามข้อกำหนด = 365 วัน (ลบอัตโนมัติรายเดือน)</span></div><div id="derr"></div>
+    <div class="actions"><span></span><button class="btn primary" type="submit">บันทึกการตั้งค่า</button></div>
+    <p class="xs muted mt">เวลาเปิด–ปิด ช่วงเวลาคิว และบัญชีผู้ดูแลระบบ แก้ในชีต <b>Settings</b> / <b>Admins</b> ของ Google Sheet (ดู README)</p></form>`;
+  $('#sf').addEventListener('submit', async e => {
+    e.preventDefault(); const b = $('button[type=submit]');
+    DQ.busy(b, true);
+    try {
+      await call('adminSaveSettings', { bookingWindowDays: $('#s-win').value, minAdvanceDays: $('#s-min').value, rescheduleMinDays: $('#s-rs').value, patientKeyMode: $('#s-key').value, clinicName: $('#s-name').value, clinicPhone: $('#s-ph').value, notice: $('#s-nt').value, retentionDays: $('#s-ret').value }, { requestId: DQ.uuid() });
+      toast('บันทึกการตั้งค่าแล้ว', 'ok'); viewSettings();
+    } catch (err) { DQ.busy(b, false); $('#derr').innerHTML = `<div class="notice bad mt">${esc(err.message)}</div>`; }
+  });
+}
+
+/* ======================= ประวัติการเปลี่ยนแปลง ======================= */
+async function viewAudit() {
+  loading();
+  let r; try { r = await call('adminAudit', { limit: 200 }); } catch (e) { return failBox(e, viewAudit); }
+  main().innerHTML = `<div class="adm-top"><h1>ประวัติการเปลี่ยนแปลง</h1><span class="muted small">ล่าสุด ${r.logs.length} รายการ</span></div>
+    <div class="tbl-wrap"><table class="table"><thead><tr><th>เวลา</th><th>เจ้าหน้าที่</th><th>การกระทำ</th><th>เลขที่นัด</th><th>รายละเอียด</th></tr></thead><tbody>${r.logs.map(l => `<tr><td class="num nowrap">${esc(l.time)}</td><td>${esc(l.admin)}</td><td>${ACTION_TH[l.action] || esc(l.action)}</td><td class="num">${esc(l.apptNo)}</td><td class="small">${fmtDetail(l.detail)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+/* ======================= เริ่มต้น ======================= */
+(async function boot() {
+  DQ.demoBanner();
+  if (DQ.token()) { try { const me = await call('adminMe'); A.name = me.name; return enter(); } catch (e) { /* fallthrough */ } }
+  showLogin();
+})();
+})();
+</script>
+</body>
+</html>
