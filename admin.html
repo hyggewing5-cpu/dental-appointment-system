@@ -201,14 +201,17 @@ async function changeStatus(no, st) {
 const optList = (arr, sel) => arr.map(x => `<option${x === sel ? ' selected' : ''}>${esc(x)}</option>`).join('');
 function personFields(v) {
   v = v || {};
-  return `<div class="grid2"><div class="field"><label for="f-title">คำนำหน้า</label><select class="input" id="f-title">${optList(A.opts.titles, v.title || 'นาย')}</select></div>
+  const tsel = !v.title ? A.opts.titles[0] : (A.opts.titles.includes(v.title) ? v.title : A.opts.otherTitle);
+  return `<div class="grid2"><div class="field"><label for="f-title">คำนำหน้า</label><select class="input" id="f-title">${optList(A.opts.titles, tsel)}</select>
+    <input class="input" id="f-title-o" maxlength="20" placeholder="พิมพ์คำนำหน้า เช่น ร.ท., ดร." value="${tsel === A.opts.otherTitle ? esc(v.title) : ''}" style="margin-top:8px"${tsel === A.opts.otherTitle ? '' : ' hidden'}></div>
     <div class="field"><label for="f-age">อายุ</label><input class="input" id="f-age" inputmode="numeric" maxlength="3" value="${esc(v.age || '')}"></div>
     <div class="field"><label for="f-first">ชื่อ</label><input class="input" id="f-first" maxlength="60" value="${esc(v.firstName || '')}"></div>
     <div class="field"><label for="f-last">นามสกุล</label><input class="input" id="f-last" maxlength="60" value="${esc(v.lastName || '')}"></div></div>
     <div class="grid2 mt"><div class="field"><label for="f-phone">เบอร์โทรศัพท์</label><input class="input num" id="f-phone" type="tel" inputmode="numeric" maxlength="12" value="${esc(v.phone || '')}"></div>
     <div class="field"><label for="f-rights">สิทธิการรักษา</label><select class="input" id="f-rights">${optList(A.opts.rights, v.rights)}</select></div></div>`;
 }
-const readPerson = () => ({ title: $('#f-title').value, age: $('#f-age').value.trim(), firstName: $('#f-first').value, lastName: $('#f-last').value, phone: $('#f-phone').value.replace(/[\s-]/g, ''), rights: $('#f-rights').value });
+document.addEventListener('change', e => { if (e.target && e.target.id === 'f-title') { const o = $('#f-title-o'); o.hidden = e.target.value !== A.opts.otherTitle; if (!o.hidden) o.focus(); } });
+const readPerson = () => ({ title: $('#f-title').value === A.opts.otherTitle ? $('#f-title-o').value.trim() : $('#f-title').value, age: $('#f-age').value.trim(), firstName: $('#f-first').value, lastName: $('#f-last').value, phone: $('#f-phone').value.replace(/[\s-]/g, ''), rights: $('#f-rights').value });
 const amTreatments = () => A.opts.treatments.map(t => t.name);
 const allTreatments = () => amTreatments().concat(A.opts.adminTreatments.map(t => t.name));
 const groupOf = name => (A.opts.treatments.find(t => t.name === name) || {}).group;
@@ -390,6 +393,7 @@ async function viewSettings() {
     <div class="field"><label for="s-name">ชื่อหน่วยงาน</label><input class="input" id="s-name" maxlength="80" value="${esc(s.clinicName)}"></div>
     <div class="field"><label for="s-ph">เบอร์โทรติดต่อ</label><input class="input" id="s-ph" maxlength="40" value="${esc(s.clinicPhone)}"></div></div>
     <div class="field mt"><label for="s-nt">ประกาศสั้น ๆ (แสดงหน้าแรก)</label><input class="input" id="s-nt" maxlength="200" value="${esc(s.notice)}" placeholder="เช่น ปิดให้บริการช่วงสงกรานต์"></div>
+    <h3 class="mt-l">คำนำหน้าชื่อ</h3><div class="field mt"><label for="s-ti">รายการคำนำหน้าที่ให้เลือก (คั่นด้วยจุลภาค)</label><textarea class="input" id="s-ti" rows="3" maxlength="400" placeholder="นาย, นาง, นางสาว, ร.ท., ร.อ.">${esc(s.titles)}</textarea><span class="xs muted">ระบบเพิ่มตัวเลือก “อื่น ๆ” ให้อัตโนมัติ — ผู้ป่วยเลือกแล้วพิมพ์เองได้ (ไม่เกิน 20 ตัวอักษร)</span></div>
     <h3 class="mt-l">ข้อมูลส่วนบุคคล</h3><div class="field mt" style="max-width:320px"><label for="s-ret">ระยะเวลาเก็บรักษา (วัน)</label><input class="input" id="s-ret" type="number" min="90" max="1095" value="${esc(s.retentionDays)}"><span class="xs muted">ค่าตามข้อกำหนด = 365 วัน (ลบอัตโนมัติรายเดือน)</span></div><div id="derr"></div>
     <div class="actions"><span></span><button class="btn primary" type="submit">บันทึกการตั้งค่า</button></div>
     <p class="xs muted mt">เวลาเปิด–ปิด ช่วงเวลาคิว และบัญชีผู้ดูแลระบบ แก้ในชีต <b>Settings</b> / <b>Admins</b> ของ Google Sheet (ดู README)</p></form>`;
@@ -397,8 +401,8 @@ async function viewSettings() {
     e.preventDefault(); const b = $('button[type=submit]');
     DQ.busy(b, true);
     try {
-      await call('adminSaveSettings', { bookingWindowDays: $('#s-win').value, minAdvanceDays: $('#s-min').value, rescheduleMinDays: $('#s-rs').value, patientKeyMode: $('#s-key').value, clinicName: $('#s-name').value, clinicPhone: $('#s-ph').value, notice: $('#s-nt').value, retentionDays: $('#s-ret').value }, { requestId: DQ.uuid() });
-      toast('บันทึกการตั้งค่าแล้ว', 'ok'); viewSettings();
+      await call('adminSaveSettings', { bookingWindowDays: $('#s-win').value, minAdvanceDays: $('#s-min').value, rescheduleMinDays: $('#s-rs').value, patientKeyMode: $('#s-key').value, clinicName: $('#s-name').value, clinicPhone: $('#s-ph').value, notice: $('#s-nt').value, titles: $('#s-ti').value, retentionDays: $('#s-ret').value }, { requestId: DQ.uuid() });
+      A.opts = await call('adminOptions'); toast('บันทึกการตั้งค่าแล้ว', 'ok'); viewSettings();
     } catch (err) { DQ.busy(b, false); $('#derr').innerHTML = `<div class="notice bad mt">${esc(err.message)}</div>`; }
   });
 }

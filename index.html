@@ -203,10 +203,11 @@ var Book = (function () {
 
   /* ---- 1: ข้อมูล ---- */
   function step1() {
-    var f = S.f;
+    var f = S.f, titleSel = !f.title ? '' : (cfg.titles.indexOf(f.title) >= 0 ? f.title : cfg.otherTitle);
     root.innerHTML = stepper() + '<div class="card"><div class="panel-title"><h2>ข้อมูลผู้ป่วย</h2><p>ทุกช่องจำเป็น</p></div>' +
       '<form id="f1" novalidate autocomplete="on"><div class="grid2">' +
-      '<div class="field"><label for="title">คำนำหน้า</label><select class="input" id="title" autocomplete="honorific-prefix"><option value="">เลือก</option>' + cfg.titles.map(function (t) { return '<option' + (f.title === t ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') + '</select><div class="errmsg" id="e-title"></div></div>' +
+      '<div class="field"><label for="title">คำนำหน้า</label><select class="input" id="title" autocomplete="honorific-prefix"><option value="">เลือก</option>' + cfg.titles.map(function (t) { return '<option' + (titleSel === t ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') + '</select>' +
+      '<input class="input mt-s" id="titleOther" maxlength="20" placeholder="พิมพ์คำนำหน้า เช่น ร.ท., ดร." value="' + esc(titleSel === cfg.otherTitle ? f.title : '') + '"' + (titleSel === cfg.otherTitle ? '' : ' hidden') + '><div class="errmsg" id="e-title"></div></div>' +
       '<div class="field"><label for="age">อายุ (ปี)</label><input class="input" id="age" inputmode="numeric" maxlength="3" autocomplete="off" value="' + esc(f.age) + '" placeholder="เช่น 35"><div class="errmsg" id="e-age"></div></div>' +
       '<div class="field"><label for="firstName">ชื่อ</label><input class="input" id="firstName" autocomplete="given-name" maxlength="60" value="' + esc(f.firstName) + '"><div class="errmsg" id="e-firstName"></div></div>' +
       '<div class="field"><label for="lastName">นามสกุล</label><input class="input" id="lastName" autocomplete="family-name" maxlength="60" value="' + esc(f.lastName) + '"><div class="errmsg" id="e-lastName"></div></div>' +
@@ -216,6 +217,7 @@ var Book = (function () {
       '</div><div class="errmsg" id="e-rights"></div><p class="xs muted">เจ้าหน้าที่จะตรวจสอบสิทธิการรักษาจริงอีกครั้งก่อนให้บริการ</p></div>' +
       '<label class="check mt"><input type="checkbox" id="consent"' + (f.consent ? ' checked' : '') + '><span>ข้าพเจ้ายินยอมให้เก็บและใช้ข้อมูลข้างต้นเพื่อการนัดหมายและการให้บริการทางทันตกรรม โดยเก็บรักษาไว้ไม่เกิน 1 ปี</span></label><div class="errmsg" id="e-consent"></div>' +
       '<div class="actions"><span></span><button class="btn primary" type="submit">ถัดไป ' + ic('chevR', 18) + '</button></div></form></div>';
+    $('#title', root).addEventListener('change', function (e) { var o = $('#titleOther', root); o.hidden = e.target.value !== cfg.otherTitle; if (!o.hidden) o.focus(); });
     var ph = $('#phone', root);
     ph.addEventListener('input', function () { ph.value = ph.value.replace(/\D/g, '').slice(0, 10); });
     $('#age', root).addEventListener('input', function (e) { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 3); });
@@ -223,11 +225,11 @@ var Book = (function () {
   }
   function collect() {
     var f = S.f, ok = true, first = null;
-    f.title = $('#title', root).value; f.firstName = $('#firstName', root).value.trim().replace(/\s+/g, ' '); f.lastName = $('#lastName', root).value.trim().replace(/\s+/g, ' ');
+    var tsel = $('#title', root).value; f.title = tsel === cfg.otherTitle ? $('#titleOther', root).value.trim().replace(/\s+/g, ' ') : tsel; f.firstName = $('#firstName', root).value.trim().replace(/\s+/g, ' '); f.lastName = $('#lastName', root).value.trim().replace(/\s+/g, ' ');
     f.age = $('#age', root).value.trim(); f.phone = $('#phone', root).value.replace(/[\s-]/g, '');
     var r = root.querySelector('input[name=rights]:checked'); f.rights = r ? r.value : ''; f.consent = $('#consent', root).checked;
     function bad(id, msg) { var el = $('#e-' + id, root); el.textContent = msg || ''; var inp = $('#' + id, root); if (inp) inp.classList.toggle('err', !!msg); if (msg) { ok = false; first = first || inp || el; } }
-    bad('title', f.title ? '' : 'กรุณาเลือกคำนำหน้า');
+    bad('title', !tsel ? 'กรุณาเลือกคำนำหน้า' : !f.title ? 'กรุณาพิมพ์คำนำหน้า' : f.title.length > 20 ? 'ไม่เกิน 20 ตัวอักษร' : /[<>]/.test(f.title) ? 'ห้ามใช้สัญลักษณ์ < >' : '');
     bad('firstName', !f.firstName ? 'กรุณากรอกชื่อ' : /[<>]/.test(f.firstName) ? 'ห้ามใช้สัญลักษณ์ < >' : '');
     bad('lastName', !f.lastName ? 'กรุณากรอกนามสกุล' : /[<>]/.test(f.lastName) ? 'ห้ามใช้สัญลักษณ์ < >' : '');
     var age = parseInt(f.age, 10); bad('age', (isNaN(age) || age < 0 || age > 120) ? 'กรุณากรอกอายุ 0–120 ปี' : '');

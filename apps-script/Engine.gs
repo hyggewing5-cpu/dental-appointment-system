@@ -11,6 +11,7 @@ var Engine = (function () {
   var DEFAULTS = {
     clinicName: 'งานทันตกรรม โรงพยาบาลกองบิน 5',
     clinicPhone: '',
+    titles: 'นาย,นาง,นางสาว,เด็กชาย,เด็กหญิง', // คำนำหน้าที่ Admin เพิ่ม/ลบได้ (คั่นด้วยจุลภาค)
     notice: '',
     bookingWindowDays: '60',   // เปิดจองล่วงหน้า (1–2 เดือน) Admin ปรับได้
     minAdvanceDays: '1',       // จองได้ตั้งแต่ "พรุ่งนี้"
@@ -40,7 +41,7 @@ var Engine = (function () {
     'สิทธิ 30 บาท (โรงพยาบาลกองบิน 5)',
     'เงินสด (รวมประกันสังคม)'
   ];
-  var TITLES = ['นาย', 'นาง', 'นางสาว', 'เด็กชาย', 'เด็กหญิง', 'อื่น ๆ'];
+  var OTHER_TITLE = 'อื่น ๆ'; // ตัวเลือกพิเศษ: ให้ผู้ใช้พิมพ์คำนำหน้าเอง (ไม่เก็บค่านี้ลงข้อมูล)
   var STATUSES = ['waiting', 'treating', 'done', 'cancelled', 'noshow'];
   var ACTIVE = ['waiting', 'treating'];
   var FREE = ['cancelled', 'noshow'];
@@ -75,6 +76,14 @@ var Engine = (function () {
     if (isNaN(n)) return dflt;
     return Math.max(lo, Math.min(hi, n));
   }
+  function parseTitles(v) {
+    var seen = {}, out = [];
+    String(v).split(',').forEach(function (x) {
+      x = x.replace(/[<>]/g, '').replace(/\s+/g, ' ').trim();
+      if (x && x.length <= 20 && x !== OTHER_TITLE && !seen[x] && out.length < 30) { seen[x] = 1; out.push(x); }
+    });
+    return out.length ? out : parseTitles(DEFAULTS.titles);
+  }
   function parseCfg(raw) {
     var s = {}, k;
     for (k in DEFAULTS) s[k] = DEFAULTS[k];
@@ -82,6 +91,7 @@ var Engine = (function () {
     var days = function (v) { return String(v).split(',').map(function (x) { return parseInt(x, 10); }).filter(function (x) { return !isNaN(x); }); };
     return {
       clinicName: s.clinicName, clinicPhone: s.clinicPhone, notice: s.notice,
+      titles: parseTitles(s.titles),
       bookingWindowDays: intIn(s.bookingWindowDays, 7, 92, 60),
       minAdvanceDays: intIn(s.minAdvanceDays, 0, 30, 1),
       rescheduleMinDays: intIn(s.rescheduleMinDays, 0, 30, 1),
@@ -143,8 +153,10 @@ var Engine = (function () {
     return s;
   }
   function cleanPatient(p) {
-    var title = String(p.title || '').trim();
-    if (TITLES.indexOf(title) < 0) fail('BAD_TITLE', 'กรุณาเลือกคำนำหน้า');
+    var title = String(p.title == null ? '' : p.title).replace(/\s+/g, ' ').trim();
+    if (!title || title === OTHER_TITLE) fail('BAD_TITLE', 'กรุณาเลือกหรือระบุคำนำหน้า');
+    if (title.length > 20) fail('BAD_TITLE', 'คำนำหน้ายาวเกินไป (ไม่เกิน 20 ตัวอักษร)');
+    if (/[<>]/.test(title)) fail('BAD_TITLE', 'ห้ามใช้สัญลักษณ์ < >');
     var age = parseInt(p.age, 10);
     if (isNaN(age) || age < 0 || age > 120 || String(p.age).trim() !== String(age)) fail('BAD_AGE', 'อายุไม่ถูกต้อง (0–120 ปี)');
     var phone = normPhone(p.phone);
@@ -317,7 +329,7 @@ var Engine = (function () {
     return {
       clinicName: c.clinicName, clinicPhone: c.clinicPhone, notice: c.notice,
       today: t, minDate: addDays(t, c.minAdvanceDays), maxDate: addDays(t, c.bookingWindowDays),
-      treatments: TREATMENTS, rights: RIGHTS, titles: TITLES,
+      treatments: TREATMENTS, rights: RIGHTS, titles: c.titles.concat(OTHER_TITLE), otherTitle: OTHER_TITLE,
       amSlots: c.amSlots, amStart: '09:00', amEnd: '11:30',
       openDaysAM: c.openDaysAM, rescheduleMinDays: c.rescheduleMinDays
     };
@@ -424,7 +436,7 @@ var Engine = (function () {
   };
 
   ADMIN.adminOptions = function (st) {
-    return { treatments: TREATMENTS, adminTreatments: ADMIN_TREATMENTS, rights: RIGHTS, titles: TITLES, statuses: STATUSES,
+    return { treatments: TREATMENTS, adminTreatments: ADMIN_TREATMENTS, rights: RIGHTS, titles: st.c.titles.concat(OTHER_TITLE), otherTitle: OTHER_TITLE, statuses: STATUSES,
       amSlots: st.c.amSlots, pmStart: st.c.pmStart, pmEnd: st.c.pmEnd, today: st.now.date, clinicName: st.c.clinicName };
   };
 
@@ -574,12 +586,13 @@ var Engine = (function () {
   };
 
   var SETTING_KEYS = {
-    clinicName: [1, 80], clinicPhone: [0, 40], notice: [0, 200],
+    clinicName: [1, 80], clinicPhone: [0, 40], notice: [0, 200], titles: [1, 400],
     bookingWindowDays: 'n', minAdvanceDays: 'n', rescheduleMinDays: 'n', retentionDays: 'n', patientKeyMode: 'k'
   };
   ADMIN.adminGetSettings = function (st) {
     var c = st.c, o = {};
     Object.keys(SETTING_KEYS).forEach(function (k) { o[k] = c[k]; });
+    o.titles = c.titles.join(', ');
     return { settings: o };
   };
   ADMIN.adminSaveSettings = function (st, p) {
@@ -632,7 +645,7 @@ var Engine = (function () {
     isWrite: function (a) { return !!WRITE[a]; },
     isAdminAction: function (a) { return !!ADMIN[a]; },
     isKnown: function (a) { return !!(A[a] || ADMIN[a]); },
-    DEFAULTS: DEFAULTS, TREATMENTS: TREATMENTS, RIGHTS: RIGHTS, TITLES: TITLES, STATUSES: STATUSES,
+    DEFAULTS: DEFAULTS, TREATMENTS: TREATMENTS, RIGHTS: RIGHTS, OTHER_TITLE: OTHER_TITLE, STATUSES: STATUSES,
     util: { parseDate: parseDate, fmtDate: fmtDate, addDays: addDays, dow: dow, normPhone: normPhone, pad: pad }
   };
   return api;
