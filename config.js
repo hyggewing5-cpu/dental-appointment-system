@@ -2,7 +2,7 @@
 window.DQ_CONFIG = {
   // วาง URL ของ Web App จาก Google Apps Script (ลงท้ายด้วย /exec)
   // ถ้าเว้นว่าง ระบบจะรันใน "โหมดสาธิต" (เก็บข้อมูลในเบราว์เซอร์ ไม่เชื่อม Google Sheet)
-  API_URL: 'https://script.google.com/macros/s/AKfycbxia6X-JuBwyRi3YzVFzgqogWBO1iFNis1hm4N4vePVcT3i55DjR8qIng0ePCHQvINt7Q/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbzwixKwomOOvJ1Fh0TZnEz6MGjbZnmdqa92zkKK6FyzssZb58x0In2OuRAiN8seECIIpQ/exec',
   CLINIC_NAME: 'งานทันตกรรม',
   HOSPITAL_NAME: 'โรงพยาบาลกองบิน กองบิน 5',
   CLINIC_PHONE: ''            // เช่น '032-611031 ต่อ 6-0442' (แสดงในหน้าผู้ป่วยเมื่อต้องติดต่อเจ้าหน้าที่)
