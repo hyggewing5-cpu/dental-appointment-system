@@ -387,7 +387,7 @@ var Engine = (function () {
     else if (a.session !== 'AM' || a.adminOnly === 'Y') reason = 'นัดนี้กำหนดโดยทันตแพทย์/เจ้าหน้าที่ กรุณาติดต่อเจ้าหน้าที่เพื่อเลื่อนนัด';
     else if (!canResched) reason = 'ใกล้ถึงวันนัดแล้ว กรุณาติดต่อเจ้าหน้าที่เพื่อเลื่อนนัด';
     var hasActive = st.appts().some(function (x) { return x.session !== 'WALKIN' && isActive(x) && patientKey(st, x) === patientKey(st, a); });
-    return { appt: pub(a), canReschedule: canResched, reason: reason, canBookNext: a.status === 'done' && !hasActive };
+    return { appt: pub(a), canReschedule: canResched, canCancel: canResched, reason: reason, canBookNext: a.status === 'done' && !hasActive };
   };
 
   A.reschedule = function (st, p) {
@@ -413,6 +413,22 @@ var Engine = (function () {
     st.dirty();
     audit(st, 'reschedule', old.apptNo, { from: old.date + ' ' + old.time, to: r.rec.date + ' ' + r.rec.time, newApptNo: r.rec.apptNo });
     return { appt: pub(r.rec), pin: r.pin, previous: pub(findByNo(st, old.apptNo)) };
+  };
+
+  // ผู้ป่วยยกเลิกนัดเอง (เงื่อนไขเดียวกับการเลื่อนนัดเอง) — ไม่ลบข้อมูล เปลี่ยนสถานะเป็น "ยกเลิก" และคืนคิว
+  A.cancel = function (st, p) {
+    var a = verifyOwner(st, p);
+    if (a.status === 'cancelled') return { appt: pub(a), already: true };
+    if (a.status !== 'waiting') fail('NOT_ACTIVE', 'นัดนี้ไม่สามารถยกเลิกเองได้ (สถานะปัจจุบันไม่ใช่ "รอรับบริการ")');
+    if (a.session !== 'AM' || a.adminOnly === 'Y') fail('ADMIN_ONLY', 'นัดนี้ต้องให้เจ้าหน้าที่เป็นผู้ยกเลิก');
+    if (diffDays(st.now.date, a.date) < st.c.rescheduleMinDays) fail('TOO_LATE', 'ใกล้ถึงวันนัดแล้ว กรุณาติดต่อเจ้าหน้าที่');
+    st.ctx.db.updateAppointment(a.apptNo, {
+      status: 'cancelled', updatedAt: st.now.stamp, updatedBy: st.who(),
+      note: (a.note ? a.note + ' | ' : '') + 'ผู้ป่วยยกเลิกเองผ่านเว็บไซต์'
+    });
+    st.dirty();
+    audit(st, 'cancel', a.apptNo, { from: a.status, to: 'cancelled', by: 'patient', date: a.date, time: a.time });
+    return { appt: pub(findByNo(st, a.apptNo)) };
   };
 
   /* ---------- Admin ---------- */
@@ -625,7 +641,7 @@ var Engine = (function () {
   };
 
   /* ---------- ตัวเรียกหลัก ---------- */
-  var WRITE = { book: 1, reschedule: 1, adminCreate: 1, adminUpdate: 1, adminMove: 1, adminSetStatus: 1, adminAddClosure: 1, adminRemoveClosure: 1, adminSaveSettings: 1 };
+  var WRITE = { book: 1, reschedule: 1, cancel: 1, adminCreate: 1, adminUpdate: 1, adminMove: 1, adminSetStatus: 1, adminAddClosure: 1, adminRemoveClosure: 1, adminSaveSettings: 1 };
 
   function handle(action, params, ctx) {
     try {

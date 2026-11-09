@@ -89,3 +89,24 @@ console.log('ALL PASS, audit entries:',S.audit.length);
   assert.equal(call('adminSaveSettings',{titles:''},adm).ok,false); // ว่างไม่ได้
   console.log('TITLES PASS');
 }
+
+// ---- ผู้ป่วยยกเลิกนัดเอง
+{
+  const {S,call}=mk(); const P2={title:'นาย',firstName:'สมชาย',lastName:'ใจดี',age:'35',phone:'0812345678',rights:E.RIGHTS[0],consent:true};
+  const b=call('book',{...P2,treatment:'fill',date:'2026-11-10',time:'09:00'}); assert(b.ok); const no=b.data.appt.apptNo, pin=b.data.pin;
+  assert.equal(call('lookup',{apptNo:no,phone:'0812345678',pin}).data.canCancel,true);
+  assert.equal(call('cancel',{apptNo:no,phone:'0812345678',pin:'9999'}).code,'NOT_FOUND');      // PIN ผิด
+  assert.equal(call('cancel',{apptNo:no,phone:'0800000000',pin}).code,'NOT_FOUND');             // เบอร์ผิด
+  const c=call('cancel',{apptNo:no,phone:'0812345678',pin}); assert(c.ok,JSON.stringify(c)); assert.equal(c.data.appt.status,'cancelled');
+  assert.equal(S.appts.length,1); assert(S.appts[0].note.includes('ยกเลิกเอง'));                // ไม่ลบข้อมูล
+  assert.equal(S.audit[S.audit.length-1].action,'cancel');
+  assert(call('cancel',{apptNo:no,phone:'0812345678',pin}).data.already);                        // กดซ้ำไม่พัง
+  assert(call('book',{...P2,firstName:'คนใหม่',treatment:'fill',date:'2026-11-10',time:'09:00'}).ok); // คืนคิวแล้วจองได้
+  assert(call('book',{...P2,treatment:'fill',date:'2026-11-12',time:'09:00'}).ok);               // ผู้ป่วยเดิมจองใหม่ได้
+  // ใกล้วันนัด (พรุ่งนี้ นับเป็น 0 วัน) ยกเลิกเองไม่ได้
+  const m=mk('2026-11-10'); const b2=m.call('book',{...P2,treatment:'fill',date:'2026-11-11',time:'09:00'}); assert(b2.ok);
+  const L=m.call('lookup',{apptNo:b2.data.appt.apptNo,phone:'0812345678',pin:b2.data.pin}).data;
+  assert.equal(L.canCancel,true);
+  const m2=mk('2026-11-11'); m2.S.appts.push(...m.S.appts); assert.equal(m2.call('cancel',{apptNo:b2.data.appt.apptNo,phone:'0812345678',pin:b2.data.pin}).code,'TOO_LATE');
+  console.log('CANCEL PASS');
+}

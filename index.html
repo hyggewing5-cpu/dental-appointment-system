@@ -32,7 +32,7 @@
 
   <div class="tabs" role="tablist" aria-label="เมนู">
     <button class="tab" role="tab" id="tab-book" aria-selected="true" aria-controls="view-book">จองนัดใหม่</button>
-    <button class="tab" role="tab" id="tab-manage" aria-selected="false" aria-controls="view-manage">ตรวจสอบ / เลื่อนนัด</button>
+    <button class="tab" role="tab" id="tab-manage" aria-selected="false" aria-controls="view-manage">ตรวจสอบ / เลื่อน / ยกเลิก</button>
   </div>
 
   <section id="view-book" role="tabpanel" aria-labelledby="tab-book"></section>
@@ -266,7 +266,7 @@ var Book = (function () {
       '<div><dt>เบอร์โทรศัพท์</dt><dd class="num">' + fmtPhone(f.phone) + '</dd></div><div><dt>สิทธิการรักษา</dt><dd>' + esc(f.rights) + '</dd></div></dl></div>' +
       '<div id="err3"></div><div class="notice mt">' + ic('info') + '<span>โปรดมาถึงก่อนเวลานัด 10–15 นาที การจองสำเร็จจะได้รับการยืนยันทันที ไม่ต้องรอเจ้าหน้าที่</span></div>' +
       '<div class="actions"><button class="btn" id="back">' + ic('chevL', 18) + 'แก้ไข</button><button class="btn primary" id="ok">' + ic('check', 18) + 'ยืนยันการจอง</button></div></div>' +
-      '<aside class="aside card"><h3>ข้อควรทราบ</h3><ul class="small muted" style="padding-left:18px;margin:10px 0 0;display:grid;gap:8px"><li>มีนัดที่ยังไม่สิ้นสุดได้ครั้งละ 1 นัด</li><li>เลื่อนนัดเองได้ที่แท็บ “ตรวจสอบ / เลื่อนนัด” โดยใช้เลขที่นัด เบอร์โทร และรหัสยืนยัน</li><li>ช่วงบ่ายและเคสพิเศษ ทันตแพทย์/เจ้าหน้าที่เป็นผู้นัดให้</li></ul></aside></div>';
+      '<aside class="aside card"><h3>ข้อควรทราบ</h3><ul class="small muted" style="padding-left:18px;margin:10px 0 0;display:grid;gap:8px"><li>มีนัดที่ยังไม่สิ้นสุดได้ครั้งละ 1 นัด</li><li>เลื่อนหรือยกเลิกนัดเองได้ที่แท็บ “ตรวจสอบ / เลื่อนนัด” โดยใช้เลขที่นัด เบอร์โทร และรหัสยืนยัน</li><li>ช่วงบ่ายและเคสพิเศษ ทันตแพทย์/เจ้าหน้าที่เป็นผู้นัดให้</li></ul></aside></div>';
     $('#back', root).onclick = function () { S.step = 2; render(); };
     $('#ok', root).onclick = confirm;
   }
@@ -321,13 +321,29 @@ var Manage = (function () {
     root.innerHTML = '<div class="layout"><div class="card"><div class="row between wrap"><h2>นัดหมายของคุณ</h2>' + DQ.statusPill(a.status) + '</div>' +
       '<div class="slip" style="box-shadow:none;margin-top:14px"><div class="slip-top" style="padding:16px 20px"><div class="no" style="margin:0">' + esc(a.apptNo) + '</div></div><div class="slip-body">' +
       r('ชื่อ–นามสกุล', esc(a.title + a.firstName + ' ' + a.lastName)) + r('วันที่นัด', thai(a.date, { full: true })) + r('เวลา', a.time + ' น.') + r('ประเภทการรักษา', esc(a.treatment)) + r('สิทธิการรักษา', esc(a.rights)) + '</div><div style="height:8px"></div></div>' +
-      (appt.canReschedule ? '<div class="actions"><button class="btn" id="out">ย้อนกลับ</button><button class="btn primary" id="rs">' + ic('calendar', 18) + 'เลื่อนนัด</button></div>' :
+      (appt.canReschedule ? '<div id="cx"></div><div class="actions" id="ma"><button class="btn" id="out">ย้อนกลับ</button><button class="btn danger" id="cn">ยกเลิกนัด</button><button class="btn primary" id="rs">' + ic('calendar', 18) + 'เลื่อนนัด</button></div>' :
         '<div class="notice ' + (appt.canBookNext ? 'ok' : 'warn') + ' mt">' + ic('info') + '<span>' + (appt.canBookNext ? 'การรักษาเสร็จสิ้นแล้ว หากทันตแพทย์แจ้งให้นัดครั้งถัดไป ท่านสามารถจองได้เอง' : esc(appt.reason) + ' ' + (appt.reason.indexOf('ติดต่อ') < 0 ? '' : contactLine())) + '</span></div>' +
         '<div class="actions"><button class="btn" id="out">ย้อนกลับ</button>' + (appt.canBookNext ? '<button class="btn primary" id="nx">จองนัดครั้งถัดไป ' + ic('chevR', 18) + '</button>' : '') + '</div>') +
       '</div></div>';
     function r(k, v) { return '<div class="slip-row"><span>' + k + '</span><b>' + v + '</b></div>'; }
     $('#out', root).onclick = function () { cred = null; form(); };
     if ($('#rs', root)) $('#rs', root).onclick = resched;
+    if ($('#cn', root)) $('#cn', root).onclick = function () {
+      var box = $('#cx', root), rid = DQ.uuid();
+      box.innerHTML = '<div class="notice bad mt">' + ic('info') + '<span><b>ยืนยันยกเลิกนัด ' + esc(a.apptNo) + '?</b><br>นัดวันที่ ' + thai(a.date) + ' เวลา ' + a.time + ' น. จะถูกยกเลิก และคิวนี้จะเปิดให้ผู้อื่นจองได้ (ท่านจองนัดใหม่ได้ภายหลัง)</span></div>' +
+        '<div class="actions"><button class="btn" id="cn-no">ไม่ยกเลิก</button><button class="btn danger" id="cn-yes">ยืนยันยกเลิกนัด</button></div><div id="cn-err"></div>';
+      $('#ma', root).hidden = true;
+      box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      $('#cn-no', root).onclick = function () { box.innerHTML = ''; $('#ma', root).hidden = false; };
+      $('#cn-yes', root).onclick = async function () {
+        var b = $('#cn-yes', root); DQ.busy(b, true, 'กำลังยกเลิก…');
+        try {
+          await DQ.call('cancel', cred, { requestId: rid });
+          root.innerHTML = '<div class="layout"><div class="card" style="text-align:center"><div class="notice ok">' + ic('check') + '<span>ยกเลิกนัด ' + esc(a.apptNo) + ' เรียบร้อยแล้ว</span></div><p class="muted mt">หากต้องการนัดใหม่ สามารถจองได้ที่แท็บ “จองนัดใหม่”</p><div class="actions" style="justify-content:center"><button class="btn primary" id="gb">จองนัดใหม่</button></div></div></div>';
+          cred = null; $('#gb', root).onclick = function () { switchTab('book'); };
+        } catch (err) { DQ.busy(b, false); $('#cn-err', root).innerHTML = '<div class="notice bad mt">' + esc(err.message) + '</div>'; }
+      };
+    };
     if ($('#nx', root)) $('#nx', root).onclick = function () {
       switchTab('book'); Book.startNext({ title: a.title, firstName: a.firstName, lastName: a.lastName, age: String(a.age), phone: a.phone, rights: a.rights, consent: true });
     };
