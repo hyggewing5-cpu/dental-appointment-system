@@ -76,7 +76,7 @@ console.log('ALL PASS, audit entries:',S.audit.length);
 // ---- คำนำหน้า: ตั้งค่าได้ + พิมพ์เองได้
 {
   const {call}=mk(); const adm='ผู้ดูแล';
-  let cfg=call('getConfig',{}).data; assert.equal(cfg.titles[cfg.titles.length-1],'อื่น ๆ'); assert.equal(cfg.titles.length,22); assert(cfg.titles.includes('ร.ท.')&&cfg.titles.includes('น.อ.'));
+  let cfg=call('getConfig',{}).data; assert.equal(cfg.titles[cfg.titles.length-1],'อื่น ๆ'); assert.equal(cfg.titles.length,37); assert(cfg.titles.includes('ร.ท.หญิง')); assert(cfg.titles.includes('ร.ท.')&&cfg.titles.includes('น.อ.'));
   assert(call('adminSaveSettings',{titles:'นาย, นาง, ร.ท., ร.อ., ร.ท.'},adm).ok);
   cfg=call('getConfig',{}).data; assert.deepEqual(cfg.titles,['นาย','นาง','ร.ท.','ร.อ.','อื่น ๆ']); // ตัดซ้ำ + ต่อท้าย "อื่น ๆ"
   assert.equal(call('adminGetSettings',{},adm).data.settings.titles,'นาย, นาง, ร.ท., ร.อ.');

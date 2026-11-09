@@ -11,7 +11,7 @@ var Engine = (function () {
   var DEFAULTS = {
     clinicName: 'งานทันตกรรม โรงพยาบาลกองบิน 5',
     clinicPhone: '',
-    titles: 'นาย,นาง,นางสาว,เด็กชาย,เด็กหญิง,พล.อ.อ.,พล.อ.ท.,พล.อ.ต.,น.อ.,น.ท.,น.ต.,ร.อ.,ร.ท.,ร.ต.,พ.อ.อ.,พ.อ.ท.,พ.อ.ต.,จ.อ.,จ.ท.,จ.ต.,พลทหาร', // คำนำหน้าที่ Admin เพิ่ม/ลบได้ (คั่นด้วยจุลภาค)
+    titles: 'นาย,นาง,นางสาว,เด็กชาย,เด็กหญิง,พล.อ.อ.,พล.อ.อ.หญิง,พล.อ.ท.,พล.อ.ท.หญิง,พล.อ.ต.,พล.อ.ต.หญิง,น.อ.,น.อ.หญิง,น.ท.,น.ท.หญิง,น.ต.,น.ต.หญิง,ร.อ.,ร.อ.หญิง,ร.ท.,ร.ท.หญิง,ร.ต.,ร.ต.หญิง,พ.อ.อ.,พ.อ.อ.หญิง,พ.อ.ท.,พ.อ.ท.หญิง,พ.อ.ต.,พ.อ.ต.หญิง,จ.อ.,จ.อ.หญิง,จ.ท.,จ.ท.หญิง,จ.ต.,จ.ต.หญิง,พลทหาร', // คำนำหน้าที่ Admin เพิ่ม/ลบได้ (คั่นด้วยจุลภาค)
     notice: '',
     bookingWindowDays: '60',   // เปิดจองล่วงหน้า (1–2 เดือน) Admin ปรับได้
     minAdvanceDays: '1',       // จองได้ตั้งแต่ "พรุ่งนี้"
@@ -80,7 +80,7 @@ var Engine = (function () {
     var seen = {}, out = [];
     String(v).split(',').forEach(function (x) {
       x = x.replace(/[<>]/g, '').replace(/\s+/g, ' ').trim();
-      if (x && x.length <= 20 && x !== OTHER_TITLE && !seen[x] && out.length < 30) { seen[x] = 1; out.push(x); }
+      if (x && x.length <= 20 && x !== OTHER_TITLE && !seen[x] && out.length < 60) { seen[x] = 1; out.push(x); }
     });
     return out.length ? out : parseTitles(DEFAULTS.titles);
   }
@@ -586,7 +586,7 @@ var Engine = (function () {
   };
 
   var SETTING_KEYS = {
-    clinicName: [1, 80], clinicPhone: [0, 40], notice: [0, 200], titles: [1, 400],
+    clinicName: [1, 80], clinicPhone: [0, 40], notice: [0, 200], titles: [1, 800],
     bookingWindowDays: 'n', minAdvanceDays: 'n', rescheduleMinDays: 'n', retentionDays: 'n', patientKeyMode: 'k'
   };
   ADMIN.adminGetSettings = function (st) {
