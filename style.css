@@ -241,6 +241,7 @@ dialog::backdrop { background: rgba(8,27,28,.55); backdrop-filter: blur(3px); }
 .print-only { display: none; }
 @media print {
   .side, .bottom, .topbar, [data-noprint], #dlg, .demo-banner { display: none !important; }
-  .shell { display: block !important; } body { background: #fff !important; } .main { padding: 0 !important; max-width: none !important; }
+  .shell, .shell * { visibility: visible; } .shell { display: block !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } body { background: #fff !important; } .main { padding: 0 !important; max-width: none !important; }
   .print-only { display: block; margin-bottom: 12px; } .rp-card, .kpi { box-shadow: none !important; break-inside: avoid; } .chart-scroll { overflow: visible; } .chart-scroll svg { min-width: 0; }
 }
+@page { margin: 12mm; }
