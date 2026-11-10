@@ -5,5 +5,5 @@ window.DQ_CONFIG = {
   API_URL: 'https://script.google.com/macros/s/AKfycbxX63BifDU7SCS5WdWmwWV45aY7vT68MneA-cFSIIImHIgCLfLcR_vgprsU2nI5JryBqA/exec',
   CLINIC_NAME: 'งานทันตกรรม',
   HOSPITAL_NAME: 'โรงพยาบาลกองบิน กองบิน 5',
-  CLINIC_PHONE: ''            // เช่น '032-611031 ต่อ 6-0442' (แสดงในหน้าผู้ป่วยเมื่อต้องติดต่อเจ้าหน้าที่)
+  CLINIC_PHONE: '032-611031 ต่อ 6-0442'            // เช่น '032-611031 ต่อ 6-0442' (แสดงในหน้าผู้ป่วยเมื่อต้องติดต่อเจ้าหน้าที่)
 };
