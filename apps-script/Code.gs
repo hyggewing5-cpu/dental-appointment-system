@@ -17,7 +17,7 @@ var SESSION_TTL = 6 * 60 * 60;   // 6 ชม. (สูงสุดของ Cache
 /* ---------------------------------------------------------------- Web App */
 function doGet() {
   // เปิด URL /exec ในเบราว์เซอร์เพื่อตรวจเวอร์ชันที่ Deploy อยู่: hasCancel ต้องเป็น true
-  var ids = ['cancel', 'reschedule', 'lookup', 'book'], known = {};
+  var ids = ['cancel', 'reschedule', 'lookup', 'book', 'adminDailySummary', 'adminMonthlyReport'], known = {};
   ids.forEach(function (a) { known[a] = Engine.isKnown(a); });
   return json_({ ok: true, service: 'dental-queue', time: stamp_(), actions: known });
 }
