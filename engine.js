@@ -451,6 +451,92 @@ var Engine = (function () {
     };
   };
 
+  /* ---------- สรุปรายวัน / รายงานรายเดือน (อ่านอย่างเดียว) ---------- */
+  function zeroCounts() { return { total: 0, waiting: 0, treating: 0, done: 0, cancelled: 0, noshow: 0 }; }
+  function tally(list) { var t = zeroCounts(); list.forEach(function (a) { t.total++; t[a.status]++; }); return t; }
+  function groupCount(list, keyFn) {
+    var m = {}, out = [];
+    list.forEach(function (a) { var k = keyFn(a) || 'ไม่ระบุ'; if (!m[k]) { m[k] = { key: k, count: 0 }; out.push(m[k]); } m[k].count++; });
+    return out.sort(function (a, b) { return b.count - a.count; });
+  }
+  function live(list) { return list.filter(function (a) { return FREE.indexOf(a.status) < 0; }); }
+  function pct(n, d) { return d > 0 ? Math.round(n * 1000 / d) / 10 : null; }
+  function openOn(st, date) {
+    var d = dow(date), c = st.c, closed = !!closureFor(st, date);
+    return { am: !closed && c.openDaysAM.indexOf(d) >= 0, pm: !closed && c.openDaysPM.indexOf(d) >= 0, closed: closed };
+  }
+  function minutes(t) { var q = String(t).split(':'); return +q[0] * 60 + +q[1]; }
+  function ageGroup(a) { var n = parseInt(a.age, 10); return isNaN(n) ? 'ไม่ระบุ' : n < 15 ? 'เด็ก (ต่ำกว่า 15 ปี)' : n < 60 ? 'ผู้ใหญ่ (15–59 ปี)' : 'ผู้สูงอายุ (60 ปีขึ้นไป)'; }
+
+  ADMIN.adminDailySummary = function (st, p) {
+    var date = p.date || st.now.date;
+    if (!parseDate(date)) fail('BAD_DATE', 'วันที่ไม่ถูกต้อง');
+    var c = st.c, all = st.appts(), list = all.filter(function (a) { return a.date === date; }), lv = live(list), op = openOn(st, date);
+    var pmCap = op.pm ? minutes(c.pmEnd) - minutes(c.pmStart) : 0, pmUsed = 0;
+    lv.forEach(function (a) { if (a.session === 'PM') pmUsed += parseInt(a.durationMin, 10) || 0; });
+    var next = null, i, nd, no;
+    for (i = 1; i <= 14 && !next; i++) {
+      nd = addDays(date, i); no = openOn(st, nd);
+      if (no.am || no.pm) next = nd;
+    }
+    var nextList = next ? live(all.filter(function (a) { return a.date === next; })).sort(function (a, b) { return a.time < b.time ? -1 : a.time > b.time ? 1 : 0; }).map(pub) : [];
+    return {
+      date: date, dow: dow(date), today: st.now.date, closure: closureFor(st, date), openAM: op.am, openPM: op.pm,
+      counts: tally(list), bySession: { AM: tally(list.filter(function (a) { return a.session === 'AM'; })), PM: tally(list.filter(function (a) { return a.session === 'PM'; })), WALKIN: tally(list.filter(function (a) { return a.session === 'WALKIN'; })) },
+      byTreatment: groupCount(lv, function (a) { return a.treatment; }), byRights: groupCount(lv, function (a) { return a.rights; }), bySource: groupCount(lv, function (a) { return a.source; }),
+      amUsed: lv.filter(function (a) { return a.session === 'AM'; }).length, amCap: op.am ? c.amSlots.length : 0, pmUsedMin: pmUsed, pmCapMin: pmCap,
+      stale: all.filter(function (a) { return a.session !== 'WALKIN' && isActive(a) && a.date < st.now.date; }).length,
+      next: next ? { date: next, appts: nextList } : null
+    };
+  };
+
+  function monthStats(st, month) {
+    var y = +month.slice(0, 4), mo = +month.slice(5, 7), n = new Date(y, mo, 0).getDate(), c = st.c, today = st.now.date;
+    var all = st.appts(), list = all.filter(function (a) { return a.date.slice(0, 7) === month; });
+    var days = [], d, ds, op, rows = {}, amCap = 0, counted = 0, i;
+    list.forEach(function (a) { (rows[a.date] = rows[a.date] || []).push(a); });
+    var wdSum = [0, 0, 0, 0, 0, 0, 0], wdOpen = [0, 0, 0, 0, 0, 0, 0], closures = [];
+    for (i = 1; i <= n; i++) {
+      d = i < 10 ? '0' + i : '' + i; ds = month + '-' + d; op = openOn(st, ds);
+      var cl = closureFor(st, ds); if (cl) closures.push({ date: ds, reason: cl.reason });
+      var rl = rows[ds] || [], t = tally(rl), lv = live(rl);
+      var open = op.am || op.pm, isCounted = open && ds <= today;
+      if (isCounted) { counted++; wdOpen[dow(ds)]++; wdSum[dow(ds)] += t.done; if (op.am) amCap += c.amSlots.length; }
+      days.push({ date: ds, dow: dow(ds), open: open, closed: op.closed, counted: isCounted, total: t.total, waiting: t.waiting, treating: t.treating, done: t.done, cancelled: t.cancelled, noshow: t.noshow,
+        am: lv.filter(function (a) { return a.session === 'AM'; }).length, pm: lv.filter(function (a) { return a.session === 'PM'; }).length, walkin: lv.filter(function (a) { return a.session === 'WALKIN'; }).length });
+    }
+    var tot = tally(list), done = list.filter(function (a) { return a.status === 'done'; });
+    var amUsed = 0; days.forEach(function (x) { if (x.counted) amUsed += x.am; });
+    // ผู้ป่วยรายใหม่ = เสร็จสิ้นการรักษาครั้งแรกในเดือนนี้ (นับจากข้อมูลที่เก็บไว้)
+    var firstDone = {}; all.forEach(function (a) { if (a.status === 'done') { var k = patientKey(st, a); if (!firstDone[k] || a.date < firstDone[k]) firstDone[k] = a.date; } });
+    var seen = {}, uniq = 0, fresh = 0;
+    done.forEach(function (a) { var k = patientKey(st, a); if (!seen[k]) { seen[k] = 1; uniq++; if (firstDone[k] && firstDone[k].slice(0, 7) === month) fresh++; } });
+    var wd = []; for (i = 1; i <= 5; i++) wd.push({ dow: i, avg: wdOpen[i] ? Math.round(wdSum[i] * 10 / wdOpen[i]) / 10 : 0, days: wdOpen[i], done: wdSum[i] });
+    return {
+      month: month, daysInMonth: n, openDays: days.filter(function (x) { return x.open; }).length, countedDays: counted,
+      totals: tot, noshowRate: pct(tot.noshow, tot.done + tot.noshow), cancelRate: pct(tot.cancelled, tot.total),
+      doneRate: pct(tot.done, tot.done + tot.noshow + tot.cancelled), amUtil: pct(amUsed, amCap), amUsed: amUsed, amCap: amCap,
+      avgDonePerDay: counted ? Math.round(tot.done * 10 / counted) / 10 : 0,
+      patients: { unique: uniq, fresh: fresh, returning: uniq - fresh },
+      selfCancel: list.filter(function (a) { return a.status === 'cancelled' && String(a.note || '').indexOf('ผู้ป่วยยกเลิกเองผ่านเว็บไซต์') >= 0; }).length,
+      rescheduled: list.filter(function (a) { return !!a.rescheduledFrom; }).length,
+      byTreatment: groupCount(done, function (a) { return a.treatment; }), byRights: groupCount(done, function (a) { return a.rights; }),
+      byAge: groupCount(done, ageGroup), bySource: groupCount(list.filter(function (a) { return a.status !== 'cancelled' || !a.rescheduledTo; }), function (a) { return a.source; }),
+      bySession: { AM: tally(list.filter(function (a) { return a.session === 'AM'; })), PM: tally(list.filter(function (a) { return a.session === 'PM'; })), WALKIN: tally(list.filter(function (a) { return a.session === 'WALKIN'; })) },
+      byWeekday: wd, days: days, closures: closures
+    };
+  }
+
+  ADMIN.adminMonthlyReport = function (st, p) {
+    var month = String(p.month || st.now.date.slice(0, 7));
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) fail('BAD_MONTH', 'เดือนไม่ถูกต้อง');
+    var y = +month.slice(0, 4), mo = +month.slice(5, 7), pm = mo === 1 ? (y - 1) + '-12' : y + '-' + (mo - 1 < 10 ? '0' : '') + (mo - 1);
+    var cur = monthStats(st, month), prev = monthStats(st, pm);
+    cur.prev = { month: pm, total: prev.totals.total, done: prev.totals.done, cancelled: prev.totals.cancelled, noshow: prev.totals.noshow, noshowRate: prev.noshowRate, cancelRate: prev.cancelRate };
+    cur.today = st.now.date;
+    return cur;
+  };
+
   ADMIN.adminOptions = function (st) {
     return { treatments: TREATMENTS, adminTreatments: ADMIN_TREATMENTS, rights: RIGHTS, titles: st.c.titles.concat(OTHER_TITLE), otherTitle: OTHER_TITLE, statuses: STATUSES,
       amSlots: st.c.amSlots, pmStart: st.c.pmStart, pmEnd: st.c.pmEnd, today: st.now.date, clinicName: st.c.clinicName };

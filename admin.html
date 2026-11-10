@@ -26,7 +26,7 @@ const { esc, ic, thaiDate: thai, call, toast } = DQ;
 const U = DQ.util;
 const app = $('#app'), dlg = $('#dlg');
 const A = { view: 'schedule', date: null, opts: null, day: null, name: '', entered: false };
-const NAV = [['schedule', 'ตารางนัด', 'calendar'], ['patients', 'ผู้ป่วย', 'users'], ['closures', 'วันปิด', 'ban'], ['settings', 'ตั้งค่า', 'settings'], ['audit', 'ประวัติ', 'history']];
+const NAV = [['schedule', 'ตารางนัด', 'calendar'], ['reports', 'รายงาน', 'chart'], ['patients', 'ผู้ป่วย', 'users'], ['closures', 'วันปิด', 'ban'], ['settings', 'ตั้งค่า', 'settings'], ['audit', 'ประวัติ', 'history']];
 const ACTION_TH = { create: 'สร้างนัด', edit: 'แก้ไขข้อมูล', move: 'เปลี่ยนวัน/เวลา', status: 'เปลี่ยนสถานะ', reschedule: 'เลื่อนนัด (ผู้ป่วย)', closure_add: 'ปิดวัน', closure_remove: 'เปิดวัน', settings: 'ตั้งค่า', login: 'เข้าสู่ระบบ' };
 const FIELD_TH = { title: 'คำนำหน้า', firstName: 'ชื่อ', lastName: 'นามสกุล', age: 'อายุ', phone: 'เบอร์โทร', rights: 'สิทธิ', treatment: 'การรักษา', note: 'หมายเหตุ', from: 'จาก', to: 'เป็น', reason: 'เหตุผล', date: 'วันที่', time: 'เวลา', source: 'ช่องทาง', session: 'ช่วง', affected: 'ผู้ป่วยที่ได้รับผลกระทบ', dates: 'วันที่', newApptNo: 'นัดใหม่', durationMin: 'นาที' };
 const STATUS_ORDER = ['waiting', 'treating', 'done', 'cancelled', 'noshow'];
@@ -91,7 +91,7 @@ app.addEventListener('click', e => {
 function go(v) {
   A.view = v;
   document.querySelectorAll('[data-nav]').forEach(b => { if (b.dataset.nav === v) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
-  ({ schedule: viewSchedule, patients: viewPatients, closures: viewClosures, settings: viewSettings, audit: viewAudit })[v]();
+  ({ schedule: viewSchedule, reports: viewReports, patients: viewPatients, closures: viewClosures, settings: viewSettings, audit: viewAudit })[v]();
   window.scrollTo(0, 0);
 }
 const main = () => $('#main');
@@ -413,6 +413,106 @@ async function viewAudit() {
   let r; try { r = await call('adminAudit', { limit: 200 }); } catch (e) { return failBox(e, viewAudit); }
   main().innerHTML = `<div class="adm-top"><h1>ประวัติการเปลี่ยนแปลง</h1><span class="muted small">ล่าสุด ${r.logs.length} รายการ</span></div>
     <div class="tbl-wrap"><table class="table"><thead><tr><th>เวลา</th><th>เจ้าหน้าที่</th><th>การกระทำ</th><th>เลขที่นัด</th><th>รายละเอียด</th></tr></thead><tbody>${r.logs.map(l => `<tr><td class="num nowrap">${esc(l.time)}</td><td>${esc(l.admin)}</td><td>${ACTION_TH[l.action] || esc(l.action)}</td><td class="num">${esc(l.apptNo)}</td><td class="small">${fmtDetail(l.detail)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+/* ======================= สรุป / รายงาน ======================= */
+A.rep = { tab: 'day', date: null, month: null };
+const num = n => n == null ? '–' : Number(n).toLocaleString('th-TH');
+const pctTxt = v => v == null ? '–' : v + '%';
+const shiftDate = (ds, n) => { const d = new Date(ds + 'T00:00:00'); d.setDate(d.getDate() + n); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); };
+const shiftMonth = (ym, n) => { const d = new Date(+ym.slice(0, 4), +ym.slice(5, 7) - 1 + n, 1); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2); };
+const hbars = (items, unit, noPct) => { const max = Math.max(1, ...items.map(i => i.count)), tot = items.reduce((s, i) => s + i.count, 0);
+  return items.length ? `<div class="hbars">${items.map(i => `<div class="hb"><span title="${esc(i.label || i.key)}">${esc(i.label || i.key)}</span><span class="tr"><i style="width:${Math.max(3, i.count / max * 100)}%"></i></span><b>${num(i.count)}${unit ? ' ' + unit : ''}${noPct ? '' : `<em>${tot ? Math.round(i.count * 100 / tot) : 0}%</em>`}</b></div>`).join('')}</div>` : '<p class="muted small">ยังไม่มีข้อมูล</p>'; };
+const kpi = (label, val, sub, cls) => `<div class="kpi ${cls || ''}"><small>${label}</small><b>${val}</b><span class="sub">${sub || '&nbsp;'}</span></div>`;
+const delta = (cur, prev, suffix) => { if (prev == null || cur == null) return 'เดือนก่อน: –'; const d = Math.round((cur - prev) * 10) / 10; return `${d > 0 ? '▲ +' : d < 0 ? '▼ ' : '＝ '}${d === 0 ? 'เท่าเดิม' : d}${d === 0 ? '' : (suffix || '')} จากเดือนก่อน`; };
+const printHead = title => `<div class="print-only"><b style="font-size:1.2rem">${esc(A.opts.clinicName)}</b><br>${title}<br><span class="small muted">พิมพ์เมื่อ ${thai(A.opts.today, { full: true })} โดย ${esc(A.name)}</span></div>`;
+
+function viewReports() {
+  const R = A.rep; if (!R.date) R.date = A.opts.today; if (!R.month) R.month = A.opts.today.slice(0, 7);
+  main().innerHTML = `<div class="adm-top" data-noprint><h1>สรุป / รายงาน</h1></div>
+    <div class="rp-tabs" role="tablist" data-noprint><button role="tab" data-rt="day" aria-selected="${R.tab === 'day'}">สรุปรายวัน</button><button role="tab" data-rt="month" aria-selected="${R.tab === 'month'}">เดชบอร์ดรายเดือน</button></div><div id="rp"></div>`;
+  main().querySelectorAll('[data-rt]').forEach(b => b.onclick = () => { R.tab = b.dataset.rt; viewReports(); });
+  (R.tab === 'day' ? repDay : repMonth)();
+}
+
+async function repDay() {
+  const R = A.rep, box = $('#rp'); box.innerHTML = '<div class="skeleton" style="height:100px"></div><div class="skeleton mt" style="height:260px"></div>';
+  let d; try { d = await call('adminDailySummary', { date: R.date }); } catch (e) { box.innerHTML = `<div class="notice bad">${ic('alert')}<span>${esc(e.message)}</span></div>`; return; }
+  const c = d.counts, pend = c.waiting + c.treating, closedMsg = d.closure ? `<div class="banner bad">${ic('ban', 22)}<div><b>วันนี้ปิดให้บริการ</b> — ${esc(d.closure.reason)}</div></div>` : '';
+  const amPct = d.amCap ? Math.round(d.amUsed * 100 / d.amCap) : 0, pmPct = d.pmCapMin ? Math.min(100, Math.round(d.pmUsedMin * 100 / d.pmCapMin)) : 0;
+  const hr = m => (Math.round(m / 6) / 10) + ' ชม.';
+  const nx = d.next ? `<div class="rp-card wide"><div class="row between wrap"><h3>นัดวันทำการถัดไป — ${thai(d.next.date, { full: true })} (${d.next.appts.length} นัด)</h3><button class="btn sm" data-noprint onclick="window.print()">${ic('print', 16)}พิมพ์รายชื่อ</button></div>` +
+    (d.next.appts.length ? `<div class="tbl-wrap"><table class="table"><thead><tr><th>เวลา</th><th>ชื่อ–นามสกุล</th><th>เบอร์โทร</th><th>การรักษา</th><th>สถานะ</th></tr></thead><tbody>${d.next.appts.map(a => `<tr><td class="num nowrap">${a.time}${a.endTime ? '–' + a.endTime : ''}</td><td>${esc(fullName(a))}</td><td class="num nowrap"><a href="tel:${esc(a.phone)}">${fmtPhone(a.phone)}</a></td><td>${esc(a.treatment)}</td><td>${DQ.statusPill(a.status)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">ยังไม่มีผู้ป่วยนัดในวันนั้น</p>') + '</div>' : '';
+  box.innerHTML = `<div class="rp-bar" data-noprint><h2>${thai(d.date, { full: true })}</h2><span class="grow"></span>
+      <button class="btn sm" data-d="-1" aria-label="วันก่อนหน้า">‹</button><input class="input" type="date" id="rd" value="${d.date}" style="width:auto;min-height:40px"><button class="btn sm" data-d="1" aria-label="วันถัดไป">›</button><button class="btn sm" data-d="0">วันนี้</button>
+      <button class="btn sm" id="rgo">${ic('calendar', 16)}เปิดตารางนัด</button><button class="btn sm" onclick="window.print()">${ic('print', 16)}พิมพ์</button></div>
+    ${printHead('สรุปการจองประจำวัน ' + thai(d.date, { full: true }))}${closedMsg}
+    <div class="kpis">${kpi('นัดทั้งหมด', num(c.total), `ช่วงเช้า ${d.bySession.AM.total} · บ่าย ${d.bySession.PM.total} · Walk-in ${d.bySession.WALKIN.total}`)}${kpi('เสร็จสิ้น', num(c.done), 'รับบริการแล้ว', 'k-done')}${kpi('รอ / กำลังรักษา', num(pend), `รอ ${c.waiting} · กำลังรักษา ${c.treating}`, 'k-pend')}${kpi('ไม่มาตามนัด', num(c.noshow), '', 'k-mute')}${kpi('ยกเลิก', num(c.cancelled), '', 'k-bad')}</div>
+    ${d.stale ? `<div class="banner warn">${ic('alert', 22)}<div><b>มีนัดวันก่อนหน้าที่ยังไม่ปิดสถานะ ${d.stale} รายการ</b><div class="small">ผู้ป่วยกลุ่มนี้จะจองออนไลน์ใหม่ไม่ได้จนกว่าจะปิดสถานะ</div></div></div>` : ''}
+    <div class="rp-grid"><div class="rp-card"><h3>การใช้คิว</h3>
+      <div class="meter-row"><span>ช่วงเช้า (คิวออนไลน์)</span><b>${d.openAM ? `${d.amUsed} / ${d.amCap} คิว` : 'ไม่เปิด'}</b></div><div class="meter" role="img" aria-label="ใช้คิวช่วงเช้า ${amPct}%"><i style="width:${amPct}%"></i></div>
+      <div class="meter-row mt"><span>ช่วงบ่าย (ทันตแพทย์กำหนด)</span><b>${d.openPM ? `${hr(d.pmUsedMin)} / ${hr(d.pmCapMin)}` : 'ไม่เปิด'}</b></div><div class="meter" role="img" aria-label="ใช้เวลาช่วงบ่าย ${pmPct}%"><i style="width:${pmPct}%"></i></div></div>
+      <div class="rp-card"><h3>ประเภทการรักษา (ไม่นับยกเลิก/ไม่มา)</h3>${hbars(d.byTreatment)}</div>
+      <div class="rp-card"><h3>สิทธิการรักษา</h3>${hbars(d.byRights)}</div>
+      <div class="rp-card"><h3>ช่องทางการนัด</h3>${hbars(d.bySource.map(x => ({ key: x.key, label: SRC_TH[x.key] || x.key, count: x.count })))}</div>${nx}</div>`;
+  const setD = v => { R.date = v; repDay(); };
+  box.querySelectorAll('[data-d]').forEach(b => b.onclick = () => setD(b.dataset.d === '0' ? A.opts.today : shiftDate(R.date, +b.dataset.d)));
+  $('#rd', box).onchange = e => { if (e.target.value) setD(e.target.value); };
+  $('#rgo', box).onclick = () => { A.date = R.date; go('schedule'); };
+}
+
+function colChart(days) {
+  const W = 760, H = 230, pl = 30, pb = 26, pt = 10, n = days.length, bw = (W - pl) / n, max = Math.max(4, ...days.map(x => x.total)), sc = (H - pb - pt) / max;
+  let g = ''; for (let i = 0; i <= 4; i++) { const v = Math.round(max * i / 4), y = H - pb - v * sc; g += `<line class="c-grid" x1="${pl}" x2="${W}" y1="${y}" y2="${y}"/><text class="c-txt" x="${pl - 6}" y="${y + 3}" text-anchor="end">${v}</text>`; }
+  const bars = days.map((x, i) => {
+    const X = pl + i * bw + bw * .16, w = bw * .68; let y = H - pb; const seg = (v, cls) => { if (!v) return ''; const h = v * sc; y -= h; return `<rect class="${cls}" x="${X}" y="${y}" width="${w}" height="${h}" rx="2"/>`; };
+    const tip = `${x.date.slice(8)} · เสร็จสิ้น ${x.done} · รอ/กำลังรักษา ${x.waiting + x.treating} · ไม่มา ${x.noshow} · ยกเลิก ${x.cancelled}`;
+    return `<g><title>${esc(tip)}</title>${x.open ? '' : `<rect class="c-off" x="${X}" y="${H - pb - 4}" width="${w}" height="4" rx="2"/>`}${seg(x.done, 'c-done')}${seg(x.waiting + x.treating, 'c-pend')}${seg(x.noshow, 'c-noshow')}${seg(x.cancelled, 'c-cancel')}<text class="c-txt" x="${X + w / 2}" y="${H - 8}" text-anchor="middle">${+x.date.slice(8)}</text></g>`;
+  }).join('');
+  return `<div class="chart-scroll"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="กราฟจำนวนนัดรายวันของเดือน แยกตามสถานะ">${g}${bars}</svg></div>
+    <div class="legend"><span style="--c:var(--ok)">เสร็จสิ้น</span><span style="--c:var(--warn)">รอ / กำลังรักษา</span><span style="--c:var(--mute)">ไม่มาตามนัด</span><span style="--c:var(--bad)">ยกเลิก</span><span style="--c:var(--mute-bg)">วันไม่เปิดบริการ</span></div>`;
+}
+
+async function repMonth() {
+  const R = A.rep, box = $('#rp'); box.innerHTML = '<div class="skeleton" style="height:100px"></div><div class="skeleton mt" style="height:300px"></div>';
+  let r; try { r = await call('adminMonthlyReport', { month: R.month }); } catch (e) { box.innerHTML = `<div class="notice bad">${ic('alert')}<span>${esc(e.message)}</span></div>`; return; }
+  const t = r.totals, pv = r.prev, mTh = DQ.thaiMonth(r.month), pend = t.waiting + t.treating;
+  const S = [['done', 'เสร็จสิ้น', 'var(--ok)'], ['pend', 'รอ / กำลังรักษา', 'var(--warn)'], ['noshow', 'ไม่มาตามนัด', 'var(--mute)'], ['cancelled', 'ยกเลิก', 'var(--bad)']];
+  const val = { done: t.done, pend: pend, noshow: t.noshow, cancelled: t.cancelled };
+  let acc = 0; const grad = t.total ? S.map(([k, , col]) => { const a = acc, b = acc + val[k] * 100 / t.total; acc = b; return `${col} ${a}% ${b}%`; }).join(',') : 'var(--mute-bg) 0 100%';
+  const wd = r.byWeekday.map(x => ({ key: ['', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์'][x.dow], label: `${['', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์'][x.dow]} (${x.days} วัน)`, count: x.avg }));
+  const dayRows = r.days.filter(x => x.total || x.open).map(x => `<tr><td class="nowrap">${thai(x.date, { shortDay: true, noYear: true })}${x.closed ? ' <span class="pill s-noshow">ปิด</span>' : ''}</td><td class="num">${x.total}</td><td class="num">${x.am}</td><td class="num">${x.pm}</td><td class="num">${x.walkin}</td><td class="num">${x.done}</td><td class="num">${x.waiting + x.treating}</td><td class="num">${x.noshow}</td><td class="num">${x.cancelled}</td></tr>`).join('');
+  box.innerHTML = `<div class="rp-bar" data-noprint><h2>${mTh}</h2><span class="grow"></span>
+      <button class="btn sm" data-m="-1" aria-label="เดือนก่อนหน้า">‹</button><input class="input" type="month" id="rm" value="${r.month}" style="width:auto;min-height:40px"><button class="btn sm" data-m="1" aria-label="เดือนถัดไป">›</button><button class="btn sm" data-m="0">เดือนนี้</button>
+      <button class="btn sm" id="csv">${ic('download', 16)}ดาวน์โหลด CSV</button><button class="btn sm" onclick="window.print()">${ic('print', 16)}พิมพ์ / PDF</button></div>
+    ${printHead('รายงานผลการปฏิบัติงานประจำเดือน ' + mTh)}
+    <div class="kpis">${kpi('นัดทั้งหมด', num(t.total), delta(t.total, pv.total, ' นัด'))}${kpi('ผู้ป่วยที่รับบริการ (เสร็จสิ้น)', num(t.done), delta(t.done, pv.done, ' ราย'), 'k-done')}${kpi('อัตราไม่มาตามนัด', pctTxt(r.noshowRate), delta(r.noshowRate, pv.noshowRate, ' จุด'), 'k-mute')}${kpi('อัตรายกเลิก', pctTxt(r.cancelRate), delta(r.cancelRate, pv.cancelRate, ' จุด'), 'k-bad')}${kpi('ใช้คิวช่วงเช้า', pctTxt(r.amUtil), `${num(r.amUsed)} / ${num(r.amCap)} คิว (ถึงวันนี้)`)}${kpi('เฉลี่ยรับบริการ / วันทำการ', r.avgDonePerDay, `${r.countedDays} วันทำการที่ผ่านมา`, 'k-done')}</div>
+    <div class="rp-grid"><div class="rp-card wide"><h3>จำนวนนัดรายวัน แยกตามสถานะ</h3>${colChart(r.days)}</div>
+      <div class="rp-card"><h3>สัดส่วนสถานะนัดหมาย</h3><div class="donut-wrap"><div class="donut" style="background:conic-gradient(${grad})" role="img" aria-label="สัดส่วนสถานะนัดหมายของเดือน"><b>${num(t.total)}</b></div><div class="donut-list">${S.map(([k, l, col]) => `<div><span style="--c:${col}">${l}</span><b>${num(val[k])} <em class="muted small" style="font-style:normal">(${t.total ? Math.round(val[k] * 100 / t.total) : 0}%)</em></b></div>`).join('')}</div></div></div>
+      <div class="rp-card"><h3>ผลงานแยกตามการรักษา (เสร็จสิ้น)</h3>${hbars(r.byTreatment, 'ราย')}</div>
+      <div class="rp-card"><h3>สิทธิการรักษา (เสร็จสิ้น)</h3>${hbars(r.byRights, 'ราย')}</div>
+      <div class="rp-card"><h3>กลุ่มอายุ (เสร็จสิ้น)</h3>${hbars(r.byAge, 'ราย')}</div>
+      <div class="rp-card"><h3>เฉลี่ยผู้ป่วยที่รับบริการ ต่อวันทำการ (ตามวันในสัปดาห์)</h3>${hbars(wd, 'ราย', true)}</div>
+      <div class="rp-card"><h3>ช่องทางการนัด</h3>${hbars(r.bySource.map(x => ({ key: x.key, label: SRC_TH[x.key] || x.key, count: x.count })))}</div>
+      <div class="rp-card"><h3>ผู้ป่วยและการเปลี่ยนแปลงนัด</h3><div class="hbars">
+        <div class="hb"><span>ผู้ป่วยที่รับบริการ (ไม่ซ้ำคน)</span><span></span><b>${num(r.patients.unique)}</b></div><div class="hb"><span>— รายใหม่</span><span></span><b>${num(r.patients.fresh)}</b></div><div class="hb"><span>— รายเก่า</span><span></span><b>${num(r.patients.returning)}</b></div>
+        <div class="hb"><span>ผู้ป่วยยกเลิกเองผ่านเว็บ</span><span></span><b>${num(r.selfCancel)}</b></div><div class="hb"><span>เลื่อนนัดผ่านเว็บ/เจ้าหน้าที่</span><span></span><b>${num(r.rescheduled)}</b></div></div>
+        <p class="xs muted mt-s">“รายใหม่” นับจากครั้งแรกที่เสร็จสิ้นการรักษาในข้อมูลที่เก็บไว้ (ไม่เกิน 1 ปี)</p></div>
+      ${r.closures.length ? `<div class="rp-card"><h3>วันปิดให้บริการในเดือนนี้ (${r.closures.length} วัน)</h3><div class="hbars">${r.closures.map(x => `<div class="hb"><span>${thai(x.date, { shortDay: true, noYear: true })}</span><span></span><b style="white-space:normal;text-align:right">${esc(x.reason)}</b></div>`).join('')}</div></div>` : ''}
+      <div class="rp-card wide"><h3>ตารางสรุปรายวัน</h3><div class="tbl-wrap"><table class="table"><thead><tr><th>วันที่</th><th>นัดทั้งหมด</th><th>ช่วงเช้า</th><th>ช่วงบ่าย</th><th>Walk-in</th><th>เสร็จสิ้น</th><th>รอ/รักษา</th><th>ไม่มา</th><th>ยกเลิก</th></tr></thead><tbody>${dayRows || '<tr><td colspan="9" class="muted">ไม่มีข้อมูลในเดือนนี้</td></tr>'}</tbody></table></div>
+      <p class="xs muted mt-s">ช่วงเช้า/บ่าย/Walk-in นับเฉพาะนัดที่ไม่ถูกยกเลิกหรือไม่มาตามนัด</p></div></div>`;
+  const setM = v => { R.month = v; repMonth(); };
+  box.querySelectorAll('[data-m]').forEach(b => b.onclick = () => setM(b.dataset.m === '0' ? A.opts.today.slice(0, 7) : shiftMonth(R.month, +b.dataset.m)));
+  $('#rm', box).onchange = e => { if (/^\d{4}-\d{2}$/.test(e.target.value)) setM(e.target.value); };
+  $('#csv', box).onclick = () => {
+    const q = v => '"' + String(v).replace(/"/g, '""') + '"';
+    const head = ['วันที่', 'นัดทั้งหมด', 'ช่วงเช้า', 'ช่วงบ่าย', 'Walk-in', 'เสร็จสิ้น', 'รอรับบริการ', 'กำลังรักษา', 'ไม่มาตามนัด', 'ยกเลิก', 'หมายเหตุ'];
+    const rows = r.days.map(x => [x.date, x.total, x.am, x.pm, x.walkin, x.done, x.waiting, x.treating, x.noshow, x.cancelled, x.closed ? 'ปิดให้บริการ' : (x.open ? '' : 'วันหยุด')]);
+    rows.push(['รวม', t.total, '', '', '', t.done, t.waiting, t.treating, t.noshow, t.cancelled, '']);
+    const csv = '﻿' + [head].concat(rows).map(a => a.map(q).join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })), a = document.createElement('a');
+    a.href = url; a.download = 'dental-report-' + r.month + '.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1500);
+  };
 }
 
 /* ======================= เริ่มต้น ======================= */

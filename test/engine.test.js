@@ -110,3 +110,24 @@ console.log('ALL PASS, audit entries:',S.audit.length);
   const m2=mk('2026-11-11'); m2.S.appts.push(...m.S.appts); assert.equal(m2.call('cancel',{apptNo:b2.data.appt.apptNo,phone:'0812345678',pin:b2.data.pin}).code,'TOO_LATE');
   console.log('CANCEL PASS');
 }
+
+// ---- สรุปรายวัน / รายงานรายเดือน
+{
+  const {S,call}=mk('2026-11-20'); const adm='ผู้ดูแล';
+  const mkP=(n,ph)=>({title:'นาย',firstName:n,lastName:'ทดสอบ',age:'30',phone:ph,rights:E.RIGHTS[0],consent:true});
+  const b=(n,ph,tr,date,time)=>{const r=call('book',{...mkP(n,ph),treatment:tr,date,time}); assert(r.ok,JSON.stringify(r)); return r.data.appt.apptNo;};
+  const a1=b('เอ','0811111111','fill','2026-11-23','09:00'), a2=b('บี','0822222222','fill','2026-11-23','09:30'), a3=b('ซี','0833333333','scale','2026-11-23','10:00'), a4=b('ดี','0844444444','scale','2026-11-24','10:00');
+  call('adminSetStatus',{apptNo:a1,status:'done'},adm); call('adminSetStatus',{apptNo:a2,status:'noshow'},adm); call('adminSetStatus',{apptNo:a3,status:'cancelled'},adm);
+  const d=call('adminDailySummary',{date:'2026-11-23'},adm); assert(d.ok,JSON.stringify(d));
+  assert.equal(d.data.counts.total,3); assert.equal(d.data.counts.done,1); assert.equal(d.data.counts.noshow,1); assert.equal(d.data.counts.cancelled,1);
+  assert.equal(d.data.amUsed,1); assert.equal(d.data.amCap,5); assert.equal(d.data.next.date,'2026-11-24'); assert.equal(d.data.next.appts.length,1);
+  assert(!JSON.stringify(d).includes('pinHash'));
+  assert.equal(call('adminDailySummary',{date:'2026-11-23'}).ok,false);                      // ต้องเป็น Admin
+  const m=call('adminMonthlyReport',{month:'2026-11'},adm); assert(m.ok,JSON.stringify(m)); const r=m.data;
+  assert.equal(r.totals.total,4); assert.equal(r.totals.done,1); assert.equal(r.noshowRate,50); assert.equal(r.cancelRate,25);
+  assert.equal(r.byTreatment[0].key,'อุดฟัน'); assert.equal(r.patients.unique,1); assert.equal(r.patients.fresh,1);
+  assert.equal(r.days.length,30); assert.equal(r.days.find(x=>x.date==='2026-11-23').done,1); assert.equal(r.prev.month,'2026-10');
+  assert.equal(call('adminMonthlyReport',{month:'2026-13'},adm).code,'BAD_MONTH');
+  assert.equal(call('adminMonthlyReport',{month:'2026-01'},adm).data.prev.month,'2025-12');
+  console.log('REPORT PASS');
+}
