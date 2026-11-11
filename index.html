@@ -162,6 +162,14 @@ function slipHtml(a, pin, opt) {
     '<button class="btn full ghost" data-act="again">กลับหน้าหลัก</button></div></div>';
   function row(k, v) { return '<div class="slip-row"><span>' + k + '</span><b>' + v + '</b></div>'; }
 }
+function showSlipImage(url) {
+  // ทางสำรอง: แสดงรูปให้กดค้างแล้วเลือก "เพิ่มลงในรูปภาพ"
+  var o = document.createElement('div');
+  o.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.85);overflow:auto;padding:16px;text-align:center;color:#fff';
+  o.innerHTML = '<p style="margin:8px 0 12px">กดค้างที่รูป แล้วเลือก “เพิ่มลงในรูปภาพ” (Save to Photos)</p><img src="' + url + '" alt="ใบนัด" style="max-width:100%;border-radius:12px;background:#fff"><p><button class="btn" style="margin-top:14px">ปิด</button></p>';
+  o.querySelector('button').onclick = function () { o.remove(); };
+  document.body.appendChild(o);
+}
 function bindSlip(root, a, onAgain) {
   root.addEventListener('click', async function (e) {
     var b = e.target.closest('[data-act]'); if (!b) return;
@@ -172,7 +180,20 @@ function bindSlip(root, a, onAgain) {
       try {
         if (!window.html2canvas) await DQ.loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
         var cv = await html2canvas($('#slip'), { scale: 2, backgroundColor: null, useCORS: true });
-        var l = document.createElement('a'); l.download = 'ใบนัด-' + a.apptNo + '.png'; l.href = cv.toDataURL('image/png'); l.click();
+        var blob = await new Promise(function (ok) { cv.toBlob(ok, 'image/png'); });
+        if (!blob) throw new Error('blob');
+        var fname = 'appointment-' + a.apptNo + '.png', file = null;
+        try { file = new File([blob], fname, { type: 'image/png' }); } catch (e2) {}
+        if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+          // มือถือ (iOS/Android): เปิดแผ่นแชร์ → เลือก "บันทึกรูปภาพ"
+          try { await navigator.share({ files: [file], title: 'ใบนัด ' + a.apptNo }); }
+          catch (e3) { if (e3 && e3.name !== 'AbortError') showSlipImage(URL.createObjectURL(blob)); }
+        } else if (/iP(hone|ad|od)/.test(navigator.userAgent)) {
+          showSlipImage(URL.createObjectURL(blob));
+        } else {
+          var l = document.createElement('a'); l.download = fname; l.href = URL.createObjectURL(blob);
+          document.body.appendChild(l); l.click(); l.remove();
+        }
       } catch (err) { DQ.toast('บันทึกรูปไม่สำเร็จ กรุณาแคปหน้าจอแทน', 'err'); }
       DQ.busy(b, false);
     }
