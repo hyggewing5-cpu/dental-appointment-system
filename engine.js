@@ -722,12 +722,57 @@ var Engine = (function () {
     return { saved: out };
   };
 
+  /* ---------- จัดการบัญชีผู้ดูแลระบบ ---------- */
+  function acctRows(st) { return st.ctx.admins ? st.ctx.admins.list() : fail('NO_ADMIN_STORE', 'ระบบนี้ยังไม่รองรับการจัดการผู้ดูแล'); }
+  function acctOn(r) { return String(r.active).toUpperCase() !== 'N'; }
+  ADMIN.adminListAdmins = function (st) {
+    var me = String(st.ctx.adminUser || '').toLowerCase();
+    return { admins: acctRows(st).map(function (r) {
+      return { username: r.username, displayName: r.displayName || r.username, active: acctOn(r), isMe: String(r.username).toLowerCase() === me };
+    }) };
+  };
+  ADMIN.adminSaveAdmin = function (st, p) {
+    var rows = acctRows(st), me = String(st.ctx.adminUser || '').toLowerCase();
+    var u = String(p.username || '').trim().toLowerCase();
+    var name = String(p.displayName || '').replace(/[<>]/g, '').trim();
+    var pw = p.password == null ? '' : String(p.password);
+    if (!/^[a-z0-9._-]{3,30}$/.test(u)) fail('BAD_USER', 'ชื่อผู้ใช้ต้องเป็นอักษรอังกฤษพิมพ์เล็ก/ตัวเลข/. _ - ยาว 3–30 ตัว');
+    if (pw && (pw.length < 8 || pw.length > 100)) fail('BAD_PASSWORD', 'รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร');
+    var cur = rows.filter(function (r) { return String(r.username).toLowerCase() === u; })[0];
+    if (p.mode === 'add') {
+      if (cur) fail('USER_EXISTS', 'มีชื่อผู้ใช้นี้อยู่แล้ว');
+      if (!name || name.length > 60) fail('BAD_NAME', 'กรุณากรอกชื่อที่แสดง (ไม่เกิน 60 ตัวอักษร)');
+      if (!pw) fail('BAD_PASSWORD', 'กรุณากำหนดรหัสผ่าน (อย่างน้อย 8 ตัวอักษร)');
+      var salt = st.ctx.newSalt();
+      st.ctx.admins.add({ username: u, displayName: name, salt: salt, hash: st.ctx.hashPw(pw, salt), active: 'Y' });
+      audit(st, 'admin_add', '', { username: u, displayName: name });
+      return { saved: u };
+    }
+    if (!cur) fail('NOT_FOUND', 'ไม่พบผู้ดูแลนี้');
+    var patch = {}, what = [];
+    if (name) { if (name.length > 60) fail('BAD_NAME', 'ชื่อที่แสดงยาวเกินไป'); patch.displayName = name; what.push('name'); }
+    if (pw) { var s2 = st.ctx.newSalt(); patch.salt = s2; patch.hash = st.ctx.hashPw(pw, s2); what.push('password'); }
+    if (p.active !== undefined) {
+      var on = p.active === true || p.active === 'Y' || p.active === 'true';
+      if (!on) {
+        if (u === me) fail('SELF_DISABLE', 'ไม่สามารถปิดการใช้งานบัญชีของตนเองได้');
+        var others = rows.filter(function (r) { return acctOn(r) && String(r.username).toLowerCase() !== u; });
+        if (!others.length) fail('LAST_ADMIN', 'ต้องมีผู้ดูแลที่ใช้งานได้อย่างน้อย 1 บัญชี');
+      }
+      if (on !== acctOn(cur)) { patch.active = on ? 'Y' : 'N'; what.push(on ? 'enable' : 'disable'); }
+    }
+    if (!what.length) return { saved: u };
+    st.ctx.admins.update(cur.username, patch);
+    audit(st, 'admin_edit', '', { username: u, changes: what });
+    return { saved: u };
+  };
+
   ADMIN.adminAudit = function (st, p) {
     return { logs: st.ctx.db.listAudit(Math.min(parseInt(p.limit, 10) || 200, 500), null) };
   };
 
   /* ---------- ตัวเรียกหลัก ---------- */
-  var WRITE = { book: 1, reschedule: 1, cancel: 1, adminCreate: 1, adminUpdate: 1, adminMove: 1, adminSetStatus: 1, adminAddClosure: 1, adminRemoveClosure: 1, adminSaveSettings: 1 };
+  var WRITE = { book: 1, reschedule: 1, cancel: 1, adminCreate: 1, adminUpdate: 1, adminMove: 1, adminSetStatus: 1, adminAddClosure: 1, adminRemoveClosure: 1, adminSaveSettings: 1, adminSaveAdmin: 1 };
 
   function handle(action, params, ctx) {
     try {

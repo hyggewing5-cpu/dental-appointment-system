@@ -396,7 +396,9 @@ async function viewSettings() {
     <h3 class="mt-l">คำนำหน้าชื่อ</h3><div class="field mt"><label for="s-ti">รายการคำนำหน้าที่ให้เลือก (คั่นด้วยจุลภาค)</label><textarea class="input" id="s-ti" rows="3" maxlength="800" placeholder="นาย, นาง, นางสาว, ร.ท., ร.อ.">${esc(s.titles)}</textarea><span class="xs muted">ระบบเพิ่มตัวเลือก “อื่น ๆ” ให้อัตโนมัติ — ผู้ป่วยเลือกแล้วพิมพ์เองได้ (ไม่เกิน 20 ตัวอักษร)</span></div>
     <h3 class="mt-l">ข้อมูลส่วนบุคคล</h3><div class="field mt" style="max-width:320px"><label for="s-ret">ระยะเวลาเก็บรักษา (วัน)</label><input class="input" id="s-ret" type="number" min="90" max="1095" value="${esc(s.retentionDays)}"><span class="xs muted">ค่าตามข้อกำหนด = 365 วัน (ลบอัตโนมัติรายเดือน)</span></div><div id="derr"></div>
     <div class="actions"><span></span><button class="btn primary" type="submit">บันทึกการตั้งค่า</button></div>
-    <p class="xs muted mt">เวลาเปิด–ปิด ช่วงเวลาคิว และบัญชีผู้ดูแลระบบ แก้ในชีต <b>Settings</b> / <b>Admins</b> ของ Google Sheet (ดู README)</p></form>`;
+    <p class="xs muted mt">เวลาเปิด–ปิดและช่วงเวลาคิว แก้ในชีต <b>Settings</b> ของ Google Sheet (ดู README)</p></form>
+    <section class="card mt-l" id="adm-box" style="max-width:720px"><div class="skeleton" style="height:90px"></div></section>`;
+  admList();
   $('#sf').addEventListener('submit', async e => {
     e.preventDefault(); const b = $('button[type=submit]');
     DQ.busy(b, true);
@@ -405,6 +407,38 @@ async function viewSettings() {
       A.opts = await call('adminOptions'); toast('บันทึกการตั้งค่าแล้ว', 'ok'); viewSettings();
     } catch (err) { DQ.busy(b, false); $('#derr').innerHTML = `<div class="notice bad mt">${esc(err.message)}</div>`; }
   });
+}
+
+/* ---- จัดการผู้ดูแลระบบ ---- */
+async function admList() {
+  const box = $('#adm-box'); if (!box) return;
+  let r; try { r = await call('adminListAdmins'); } catch (e) { box.innerHTML = `<h3>ผู้ดูแลระบบ</h3><div class="notice bad mt">${esc(e.message)}${e.code === 'BAD_ACTION' ? ' — ยังไม่ได้อัปเดต Apps Script (Deploy เวอร์ชันใหม่)' : ''}</div>`; return; }
+  const on = r.admins.filter(a => a.active).length;
+  box.innerHTML = `<div class="row between wrap"><h3>ผู้ดูแลระบบ <span class="muted small">(${on} บัญชีที่ใช้งานอยู่)</span></h3><button class="btn sm primary" id="adm-add">${ic('plus', 16)}เพิ่มผู้ดูแล</button></div>
+    <div class="tbl-wrap mt"><table class="table"><thead><tr><th>ชื่อที่แสดง</th><th>ชื่อผู้ใช้</th><th>สถานะ</th><th></th></tr></thead><tbody>${r.admins.map(a => `<tr${a.active ? '' : ' class="muted"'}>
+      <td>${esc(a.displayName)}${a.isMe ? ' <span class="chip">คุณ</span>' : ''}</td><td>${esc(a.username)}</td><td style="white-space:nowrap">${a.active ? 'ใช้งาน' : 'ปิดใช้งาน'}</td>
+      <td style="text-align:right"><button class="btn sm" data-ae="${esc(a.username)}">แก้ไข</button></td></tr>`).join('')}</tbody></table></div>
+    <p class="xs muted mt">ผู้ดูแลทุกคนมีสิทธิ์เท่ากัน รหัสผ่านถูกเข้ารหัสแบบทางเดียว ผู้ดูแลคนอื่นมองไม่เห็น การปิดใช้งานมีผลทันที</p>`;
+  $('#adm-add').onclick = () => admDlg(null, r.admins);
+  box.querySelectorAll('[data-ae]').forEach(b => b.onclick = () => admDlg(r.admins.find(a => a.username === b.dataset.ae), r.admins));
+}
+function admDlg(a, all) {
+  const add = !a, onCount = all.filter(x => x.active).length;
+  openDlg(add ? 'เพิ่มผู้ดูแลระบบ' : 'แก้ไขผู้ดูแล — ' + esc(a.username),
+    `<form id="af" novalidate><div class="field"><label for="a-u">ชื่อผู้ใช้ (a-z 0-9 . _ -)</label><input class="input" id="a-u" maxlength="30" autocomplete="off" value="${add ? '' : esc(a.username)}"${add ? '' : ' disabled'}></div>
+     <div class="field mt"><label for="a-n">ชื่อที่แสดง / ชื่อเจ้าหน้าที่</label><input class="input" id="a-n" maxlength="60" autocomplete="off" value="${add ? '' : esc(a.displayName)}"></div>
+     <div class="field mt"><label for="a-p">${add ? 'รหัสผ่าน (อย่างน้อย 8 ตัวอักษร)' : 'รหัสผ่านใหม่ (เว้นว่างถ้าไม่เปลี่ยน)'}</label><input class="input" id="a-p" type="password" autocomplete="new-password" maxlength="100"></div>
+     ${add ? '' : `<label class="check mt"><input type="checkbox" id="a-on"${a.active ? ' checked' : ''}${a.isMe || (a.active && onCount < 2) ? ' disabled' : ''}> เปิดใช้งานบัญชีนี้${a.isMe ? ' <span class="xs muted">(ปิดบัญชีตนเองไม่ได้)</span>' : ''}</label>`}
+     <div id="aerr"></div></form>`,
+    `<button class="btn" data-close>ยกเลิก</button><button class="btn primary" id="a-ok">บันทึก</button>`);
+  $('#a-ok').onclick = async e => {
+    const b = e.currentTarget, p = { mode: add ? 'add' : 'edit', username: $('#a-u').value, displayName: $('#a-n').value, password: $('#a-p').value };
+    if (!p.password) delete p.password;
+    if (!add) p.active = $('#a-on').checked;
+    DQ.busy(b, true);
+    try { await call('adminSaveAdmin', p, { requestId: DQ.uuid() }); closeDlg(); toast(add ? 'เพิ่มผู้ดูแลแล้ว' : 'บันทึกแล้ว', 'ok'); admList(); }
+    catch (err) { DQ.busy(b, false); $('#aerr').innerHTML = `<div class="notice bad mt">${esc(err.message)}</div>`; }
+  };
 }
 
 /* ======================= ประวัติการเปลี่ยนแปลง ======================= */

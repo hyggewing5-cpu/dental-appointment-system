@@ -17,7 +17,7 @@ var SESSION_TTL = 6 * 60 * 60;   // 6 ชม. (สูงสุดของ Cache
 /* ---------------------------------------------------------------- Web App */
 function doGet() {
   // เปิด URL /exec ในเบราว์เซอร์เพื่อตรวจเวอร์ชันที่ Deploy อยู่: hasCancel ต้องเป็น true
-  var ids = ['cancel', 'reschedule', 'lookup', 'book', 'adminDailySummary', 'adminMonthlyReport'], known = {};
+  var ids = ['cancel', 'reschedule', 'lookup', 'book', 'adminDailySummary', 'adminMonthlyReport', 'adminListAdmins', 'adminSaveAdmin'], known = {};
   ids.forEach(function (a) { known[a] = Engine.isKnown(a); });
   return json_({ ok: true, service: 'dental-queue', time: stamp_(), actions: known });
 }
@@ -41,14 +41,19 @@ function route_(req) {
   if (action === 'adminMe')     { var s0 = session_(req.token); return s0 ? { ok: true, data: { name: s0.name } } : { ok: false, code: 'AUTH', message: 'กรุณาเข้าสู่ระบบ' }; }
   if (!Engine.isKnown(action))  return { ok: false, code: 'BAD_ACTION', message: 'ไม่รู้จักคำสั่ง' };
 
-  var admin = null;
+  var admin = null, adminUser = null;
   if (Engine.isAdminAction(action)) {
     var s = session_(req.token);
     if (!s) return { ok: false, code: 'AUTH', message: 'หมดเวลาการเข้าสู่ระบบ กรุณาเข้าสู่ระบบอีกครั้ง' };
-    admin = s.name;
+    var live = findAdmin_(s.u);                  // บัญชีที่ถูกปิดใช้งานต้องใช้งานต่อไม่ได้ทันที
+    if (!live || String(live.active).toUpperCase() === 'N') {
+      CacheService.getScriptCache().remove('sess_' + req.token);
+      return { ok: false, code: 'AUTH', message: 'บัญชีนี้ถูกปิดการใช้งาน' };
+    }
+    admin = live.displayName || live.username; adminUser = String(live.username).toLowerCase();
   }
 
-  if (!Engine.isWrite(action)) return Engine.handle(action, params, ctx_(admin));
+  if (!Engine.isWrite(action)) return Engine.handle(action, params, ctx_(admin, adminUser));
 
   // งานเขียนข้อมูล: ล็อกทั้งสคริปต์ เพื่อกันผู้ป่วยหลายคนจองคิวสุดท้ายพร้อมกัน
   var lock = LockService.getScriptLock();
@@ -59,7 +64,7 @@ function route_(req) {
       var prev = cache.get(rid);
       if (prev) return JSON.parse(prev);
     }
-    var res = Engine.handle(action, params, ctx_(admin));
+    var res = Engine.handle(action, params, ctx_(admin, adminUser));
     if (rid && res.ok) cache.put(rid, JSON.stringify(res), 600);
     SpreadsheetApp.flush();
     return res;
@@ -73,9 +78,28 @@ function json_(o) {
 }
 
 /* ---------------------------------------------------------------- Context */
-function ctx_(admin) {
+function findAdmin_(u) {
+  u = String(u || '').toLowerCase();
+  var rows = readAll_(SHEETS.admins);
+  for (var i = 0; i < rows.length; i++) if (String(rows[i].username).toLowerCase() === u) return rows[i];
+  return null;
+}
+var adminStore_ = {
+  list: function () { return readAll_(SHEETS.admins); },
+  add: function (o) { appendRows_(SHEETS.admins, [o]); },
+  update: function (u, patch) {
+    var r = findRow_(SHEETS.admins, 'username', u);
+    if (r < 0) throw new Error('ไม่พบผู้ดูแล ' + u);
+    var s = sheet_(SHEETS.admins), cols = SHEETS.admins.cols;
+    Object.keys(patch).forEach(function (k) { s.getRange(r, cols.indexOf(k) + 1).setValue(String(patch[k])); });
+  }
+};
+
+function ctx_(admin, adminUser) {
   return {
-    db: db_, admin: admin,
+    db: db_, admin: admin, adminUser: adminUser || null, admins: adminStore_,
+    newSalt: function () { return Utilities.getUuid().replace(/-/g, '').slice(0, 16); },
+    hashPw: function (pw, salt) { return pwHash_(String(pw), String(salt)); },
     now: function () {
       var n = new Date();
       return { date: Utilities.formatDate(n, TZ, 'yyyy-MM-dd'), time: Utilities.formatDate(n, TZ, 'HH:mm'), stamp: stamp_() };

@@ -52,7 +52,13 @@
   }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(store)); } catch (e) {} }
   var fails = {};
-  function demoCtx(admin) {
+  function demoHash(s) { var h = 5381; for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return 'd' + (h >>> 0).toString(36); }
+  function demoAdmins() {
+    var st = load();
+    if (!st.admins) { st.admins = [{ username: DEMO_ADMIN.user, displayName: DEMO_ADMIN.name, salt: 's0', hash: demoHash('s0:' + DEMO_ADMIN.pass), active: 'Y' }]; save(); }
+    return st.admins;
+  }
+  function demoCtx(admin, adminUser) {
     var d = {
       getSettings: function () { return load().settings; },
       saveSettings: function (o) { Object.assign(load().settings, o); save(); },
@@ -67,8 +73,15 @@
       listAudit: function (n) { return load().audit.slice(-n).reverse(); }
     };
     return {
-      db: d, admin: admin || null, now: bkkNow,
-      hash: function (s) { var h = 5381; for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return 'd' + (h >>> 0).toString(36); },
+      db: d, admin: admin || null, adminUser: adminUser || null, now: bkkNow,
+      admins: {
+        list: function () { return demoAdmins().map(function (a) { return Object.assign({}, a); }); },
+        add: function (o) { demoAdmins().push(o); save(); },
+        update: function (u, p) { Object.assign(demoAdmins().filter(function (a) { return a.username === u; })[0], p); save(); }
+      },
+      newSalt: function () { return Math.random().toString(36).slice(2, 10); },
+      hashPw: function (pw, salt) { return demoHash(salt + ':' + pw); },
+      hash: demoHash,
       randomPin: function () { return ('000' + Math.floor(Math.random() * 10000)).slice(-4); },
       throttle: {
         blocked: function (k) { return (fails[k] || 0) >= 5; },
@@ -118,18 +131,25 @@
   }
   var DEMO_ADMIN = { user: 'admin', pass: 'admin1234', name: 'เจ้าหน้าที่ (สาธิต)' };
 
+  function demoMe() {
+    var u = DEMO_ADMIN.user; try { u = sessionStorage.getItem('dq_demo_user') || u; } catch (e) {}
+    var row = demoAdmins().filter(function (a) { return a.username === u; })[0];
+    return { user: u, name: row ? (row.displayName || u) : DEMO_ADMIN.name };
+  }
   function demoCall(action, params) {
     return new Promise(function (resolve) {
       setTimeout(function () {
         var admin = null;
         if (action === 'adminLogin') {
-          if (String(params.username).toLowerCase() === DEMO_ADMIN.user && params.password === DEMO_ADMIN.pass) return resolve({ ok: true, data: { token: 'demo-token', name: DEMO_ADMIN.name } });
+          var u = String(params.username || '').toLowerCase(), row = demoAdmins().filter(function (a) { return a.username === u && a.active !== 'N'; })[0];
+          if (row && demoHash(row.salt + ':' + params.password) === row.hash) { try { sessionStorage.setItem('dq_demo_user', u); } catch (e) {} return resolve({ ok: true, data: { token: 'demo-token', name: row.displayName || u } }); }
           return resolve({ ok: false, code: 'AUTH', message: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
         }
         if (action === 'adminLogout') return resolve({ ok: true, data: {} });
-        if (action === 'adminMe') return resolve(token() === 'demo-token' ? { ok: true, data: { name: DEMO_ADMIN.name } } : { ok: false, code: 'AUTH', message: 'กรุณาเข้าสู่ระบบ' });
-        if (Engine.isAdminAction(action) && token() === 'demo-token') admin = DEMO_ADMIN.name;
-        try { resolve(Engine.handle(action, params, demoCtx(admin))); }
+        if (action === 'adminMe') return resolve(token() === 'demo-token' ? { ok: true, data: { name: demoMe().name } } : { ok: false, code: 'AUTH', message: 'กรุณาเข้าสู่ระบบ' });
+        var au = null;
+        if (Engine.isAdminAction(action) && token() === 'demo-token') { var me = demoMe(); admin = me.name; au = me.user; }
+        try { resolve(Engine.handle(action, params, demoCtx(admin, au))); }
         catch (e) { console.error(e); resolve({ ok: false, code: 'SERVER', message: 'เกิดข้อผิดพลาดในระบบ' }); }
       }, 220);
     });

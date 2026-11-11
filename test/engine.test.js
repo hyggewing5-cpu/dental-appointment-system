@@ -1,15 +1,15 @@
 const E = require('../engine.js'); const assert = require('assert');
 function mk(todayStr='2026-11-08'){
-  const S={settings:{},appts:[],closures:[],audit:[]}; const fails={};
+  const S={settings:{},appts:[],closures:[],audit:[],admins:[{username:'admin',displayName:'แอดมิน',salt:'s',hash:'hs:Admin1234',active:'Y'}]}; const fails={};
   const db={getSettings:()=>S.settings,saveSettings:o=>Object.assign(S.settings,o),
     listAppointments:()=>S.appts.map(a=>({...a})),addAppointment:a=>S.appts.push({...a}),
     updateAppointment:(n,p)=>Object.assign(S.appts.find(a=>a.apptNo===n),p),
     deleteAppointment:n=>{S.appts=S.appts.filter(a=>a.apptNo!==n)},
     listClosures:()=>S.closures.map(c=>({...c})),addClosures:r=>S.closures.push(...r),removeClosure:d=>{S.closures=S.closures.filter(c=>c.date!==d)},
     addAudit:e=>S.audit.push(e),listAudit:()=>S.audit.slice().reverse()};
-  const ctx=(admin)=>({db,admin:admin||null,now:()=>({date:todayStr,time:'10:00',stamp:todayStr+' 10:00:00'}),
+  const ctx=(admin,au)=>({db,admin:admin||null,adminUser:au||(admin?'admin':null),admins:{list:()=>S.admins.map(a=>({...a})),add:o=>S.admins.push({...o}),update:(u,p)=>Object.assign(S.admins.find(a=>a.username===u),p)},newSalt:()=>'salt',hashPw:(p,s)=>'h'+s+':'+p,now:()=>({date:todayStr,time:'10:00',stamp:todayStr+' 10:00:00'}),
     hash:s=>'h'+s,randomPin:()=>'1234',throttle:{blocked:k=>(fails[k]||0)>=5,fail:k=>fails[k]=(fails[k]||0)+1,reset:k=>delete fails[k]}});
-  const call=(a,p,admin)=>E.handle(a,p,ctx(admin));
+  const call=(a,p,admin,au)=>E.handle(a,p,ctx(admin,au));
   return {S,call};
 }
 const P={title:'นาย',firstName:'สมชาย',lastName:'ใจดี',age:'35',phone:'081-234 5678',rights:E.RIGHTS[0],consent:true};
@@ -130,4 +130,29 @@ console.log('ALL PASS, audit entries:',S.audit.length);
   assert.equal(call('adminMonthlyReport',{month:'2026-13'},adm).code,'BAD_MONTH');
   assert.equal(call('adminMonthlyReport',{month:'2026-01'},adm).data.prev.month,'2025-12');
   console.log('REPORT PASS');
+}
+
+// ---- จัดการผู้ดูแลระบบ
+{
+  const {S,call}=mk(); const adm='แอดมิน';
+  assert.equal(call('adminListAdmins',{}).code,'AUTH');
+  let l=call('adminListAdmins',{},adm).data.admins; assert.equal(l.length,1); assert(l[0].isMe); assert(!('hash' in l[0])&&!('salt' in l[0]));
+  assert.equal(call('adminSaveAdmin',{mode:'add',username:'A b',displayName:'x',password:'12345678'},adm).code,'BAD_USER');
+  assert.equal(call('adminSaveAdmin',{mode:'add',username:'nurse1',displayName:'พยาบาล',password:'short'},adm).code,'BAD_PASSWORD');
+  assert.equal(call('adminSaveAdmin',{mode:'add',username:'nurse1',displayName:'',password:'12345678'},adm).code,'BAD_NAME');
+  assert(call('adminSaveAdmin',{mode:'add',username:'Nurse1',displayName:'พยาบาล หนึ่ง',password:'12345678'},adm).ok);
+  assert.equal(S.admins[1].username,'nurse1'); assert.equal(S.admins[1].hash,'hsalt:12345678'); assert.equal(S.admins[1].active,'Y');
+  assert.equal(call('adminSaveAdmin',{mode:'add',username:'nurse1',displayName:'ซ้ำ',password:'12345678'},adm).code,'USER_EXISTS');
+  assert(call('adminSaveAdmin',{mode:'edit',username:'nurse1',password:'newpass99'},adm).ok); assert.equal(S.admins[1].hash,'hsalt:newpass99');
+  assert(call('adminSaveAdmin',{mode:'edit',username:'nurse1',displayName:'ชื่อใหม่'},adm).ok); assert.equal(S.admins[1].displayName,'ชื่อใหม่');
+  assert.equal(call('adminSaveAdmin',{mode:'edit',username:'admin',active:false},adm).code,'SELF_DISABLE');
+  assert(call('adminSaveAdmin',{mode:'edit',username:'nurse1',active:false},adm).ok); assert.equal(S.admins[1].active,'N');
+  assert.equal(call('adminSaveAdmin',{mode:'edit',username:'nobody',active:true},adm).code,'NOT_FOUND');
+  // ผู้ดูแลคนสุดท้ายต้องไม่ถูกปิด (nurse1 ปิดอยู่ → ลองปิด admin ผ่านบัญชีอื่น)
+  assert(call('adminSaveAdmin',{mode:'edit',username:'nurse1',active:true},adm).ok);
+  assert.equal(call('adminSaveAdmin',{mode:'edit',username:'admin',active:false},'พยาบาล','nurse1').ok,true); // nurse1 ปิด admin ได้
+  assert.equal(call('adminSaveAdmin',{mode:'edit',username:'nurse1',active:false},'พยาบาล','admin').code,'LAST_ADMIN');
+  assert(!JSON.stringify(S.audit).includes('12345678')&&!JSON.stringify(S.audit).includes('newpass99')); // ไม่เก็บรหัสผ่านใน Log
+  assert(S.audit.some(a=>a.action==='admin_add')&&S.audit.some(a=>a.action==='admin_edit'));
+  console.log('ADMINS PASS');
 }
