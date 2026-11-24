@@ -213,3 +213,20 @@ console.log('ALL PASS, audit entries:',S.audit.length);
   assert(call('adminCreate',{...Pq('ฉ',6),session:'PM',treatment:'ผ่าฟันคุด',date:D,time:'13:30'},AD).ok);
   console.log('WALKIN/TEETH PASS');
 }
+
+// ---- ประเภทการรักษาที่เจ้าหน้าที่ระบุเอง (ช่วงเช้าปกติ)
+{
+  const {S,call}=mk('2026-11-08'); const AD='เจ้าหน้าที่ A', D='2026-11-17';
+  const Pq=(n,i)=>({title:'นาย',firstName:n,lastName:'ทดสอบ',age:'40',phone:'08'+String(30000000+i),rights:E.RIGHTS[0]});
+  const b=call('book',{...Pq('ก',1),treatment:'fill',date:D,time:'09:00',consent:true}); assert(b.ok); const no=b.data.appt.apptNo;
+  assert.equal(call('adminUpdate',{...Pq('ก',1),apptNo:no,treatment:'ถอนฟัน',note:''},AD).code,'TREATMENT_MISMATCH'); // มาตรฐานยังตรวจกลุ่ม
+  assert.equal(call('adminUpdate',{...Pq('ก',1),apptNo:no,treatment:'อื่น ๆ (ระบุเอง)',note:''},AD).code,'BAD_TREATMENT');
+  const u=call('adminUpdate',{...Pq('ก',1),apptNo:no,treatment:'ฟอกสีฟัน',note:''},AD); assert(u.ok,JSON.stringify(u)); assert.equal(u.data.appt.treatment,'ฟอกสีฟัน'); assert.equal(u.data.appt.adminOnly,'Y');
+  assert(!call('lookup',{apptNo:no,phone:Pq('ก',1).phone,pin:'1234'}).data.canReschedule);
+  assert(call('adminMove',{apptNo:no,date:D,time:'10:30'},AD).ok);           // ย้ายไปคิวช่วงขูด/ถอนได้เพราะเป็นประเภทอื่น ๆ
+  assert.equal(call('adminUpdate',{...Pq('ก',1),apptNo:no,treatment:'อุดฟัน',note:''},AD).code,'TREATMENT_MISMATCH'); // 10:30 ไม่ใช่ช่วงอุดฟัน
+  const c=call('adminCreate',{...Pq('ข',2),session:'AM',treatment:'จัดฟัน ปรับลวด',date:D,time:'11:00'},AD); assert(c.ok,JSON.stringify(c)); assert.equal(c.data.appt.adminOnly,'Y');
+  assert.equal(call('adminCreate',{...Pq('ค',3),session:'AM',treatment:'จัดฟัน',date:D,time:'11:00'},AD).code,'SLOT_TAKEN');
+  assert(call('adminCreate',{...Pq('ง',4),session:'PM',treatment:'ขัดฟันพิเศษ',date:D,time:'13:30',durationMin:30},AD).ok);
+  console.log('CUSTOM TREAT PASS');
+}

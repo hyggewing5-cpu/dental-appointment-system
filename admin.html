@@ -216,13 +216,21 @@ document.addEventListener('change', e => { if (e.target && e.target.id === 'f-ti
 const readPerson = () => ({ title: $('#f-title').value === A.opts.otherTitle ? $('#f-title-o').value.trim() : $('#f-title').value, age: $('#f-age').value.trim(), firstName: $('#f-first').value, lastName: $('#f-last').value, phone: $('#f-phone').value.replace(/[\s-]/g, ''), rights: $('#f-rights').value });
 const nowHM = () => { const d = new Date(); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); };
 const teethField = v => `<div class="field"><label for="f-teeth">จำนวนซี่ที่อุด/ถอน <span class="muted xs">(ไม่บังคับ)</span></label><input class="input" id="f-teeth" inputmode="numeric" maxlength="2" placeholder="เช่น 2" value="${esc(v || '')}"></div>`;
+const OTH = 'อื่น ๆ (ระบุเอง)';
+function treatPicker(list, selected) {
+  const std = list.indexOf(selected) >= 0, sel = std ? selected : OTH;
+  return `<select class="input" id="f-treat">${optList(list.concat(OTH), sel)}</select>
+    <input class="input" id="f-treat-o" maxlength="80" placeholder="เขียนอธิบายว่านัดอะไร เช่น ตัดไหม, ตรวจติดตามผล" value="${std ? '' : esc(selected || '')}" style="margin-top:8px"${std ? ' hidden' : ''}>`;
+}
+const readTreat = () => $('#f-treat').value === OTH ? $('#f-treat-o').value.trim() : $('#f-treat').value;
+document.addEventListener('change', e => { if (e.target && e.target.id === 'f-treat') { const o = $('#f-treat-o'); if (o) { o.hidden = e.target.value !== OTH; if (!o.hidden) o.focus(); } } });
 const amTreatments = () => A.opts.treatments.map(t => t.name);
 const allTreatments = () => amTreatments().concat(A.opts.adminTreatments.map(t => t.name));
 const groupOf = name => (A.opts.treatments.find(t => t.name === name) || {}).group;
 
 function amTimeSelect(dayAppts, treat, selected, selfNo) {
   const g = groupOf(treat);
-  return A.opts.amSlots.filter(s => s.group === g).map(s => {
+  return A.opts.amSlots.filter(s => !g || s.group === g).map(s => {
     const busy = dayAppts.some(a => a.session === 'AM' && a.time === s.time && !isFree(a) && a.apptNo !== selfNo);
     return `<option value="${s.time}"${s.time === selected ? ' selected' : ''}${busy ? ' disabled' : ''}>${s.time} น.${busy ? ' (ไม่ว่าง)' : ''}</option>`;
   }).join('');
@@ -234,7 +242,6 @@ async function openCreate(session, date, time) {
   let cur = A.day.appts, curDate = date;
   const slotGroup = (O.amSlots.find(s => s.time === time) || {}).group;
   const defTreat = session === 'AMX' ? 'อุดฟัน' : session === 'AM' ? (slotGroup === 'scale_extract' ? 'ขูดหินปูน' : 'อุดฟัน') : session === 'PM' ? 'ผ่าฟันคุด' : 'ปวดฟันรุนแรง';
-  const OTH = 'อื่น ๆ (ระบุเอง)';
   const timeField = session === 'AMX'
     ? `<div class="field"><label for="f-time">เวลา (${O.amSlots[0].time}–${O.extraEnd})</label><input class="input" id="f-time" type="time" min="${O.amSlots[0].time}" max="11:59" value="${time || '09:00'}"></div>`
     : session === 'AM'
@@ -243,25 +250,24 @@ async function openCreate(session, date, time) {
       ? `<div class="field"><label for="f-time">เวลาเริ่ม (${O.pmStart}–${O.pmEnd})</label><input class="input" id="f-time" type="time" step="300" min="${O.pmStart}" max="${O.pmEnd}" value="${O.pmStart}"></div>`
       : `<div class="field"><label for="f-time">เวลา</label><input class="input" id="f-time" type="time" value="${nowHM()}"></div>`;
   const treatField = session === 'AMX'
-    ? `<div class="field"><label for="f-treat">ประเภทการรักษา</label><select class="input" id="f-treat">${optList(amTreatments().concat(OTH), 'อุดฟัน')}</select>
-       <input class="input" id="f-treat-o" maxlength="80" placeholder="เขียนอธิบายว่านัดอะไร เช่น ตัดไหม, ตรวจติดตามผล" style="margin-top:8px" hidden></div>`
+    ? `<div class="field"><label for="f-treat">ประเภทการรักษา</label>${treatPicker(amTreatments(), 'อุดฟัน')}</div>`
     : session === 'WALKIN'
     ? `<div class="field"><label for="f-treat">อาการ / การรักษา</label><input class="input" id="f-treat" list="tl" value="${esc(defTreat)}" maxlength="80"><datalist id="tl">${['ปวดฟันรุนแรง', 'ฟันบวม', 'อุบัติเหตุ/ฟันแตก', ...allTreatments()].map(x => `<option>${esc(x)}</option>`).join('')}</datalist></div>`
-    : `<div class="field"><label for="f-treat">ประเภทการรักษา</label><select class="input" id="f-treat">${optList(session === 'AM' ? amTreatments() : allTreatments(), defTreat)}</select></div>`;
+    : `<div class="field"><label for="f-treat">ประเภทการรักษา</label>${treatPicker(session === 'AM' ? amTreatments() : allTreatments(), defTreat)}</div>`;
   openDlg(title, `<form id="cf" novalidate>${personFields()}
     <div class="grid2 mt">${treatField}<div class="field"><label for="f-date">วันที่</label><input class="input" id="f-date" type="date" value="${date}"></div></div>
     <div class="grid2 mt">${timeField}${session === 'PM' ? `<div class="field"><label for="f-dur">ระยะเวลา (นาที)</label><input class="input" id="f-dur" type="number" min="15" max="120" step="5" value="90"></div>` : session === 'WALKIN' ? `<div class="field"><label for="f-status">สถานะ</label><select class="input" id="f-status">${STATUS_ORDER.map(s => `<option value="${s}"${s === 'waiting' ? ' selected' : ''}>${DQ.STATUS[s].th}</option>`).join('')}</select></div>` : '<div></div>'}</div>
     <div class="grid2 mt">${teethField('')}<div class="field"><label for="f-note">หมายเหตุ</label><input class="input" id="f-note" maxlength="300"></div></div><div id="derr"></div></form>`,
     `<button class="btn" data-close>ยกเลิก</button><button class="btn primary" id="ok">${ic('check', 18)}บันทึกนัด</button>`);
   $('#f-teeth').addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 2); });
-  const fillTimes = () => { if (session !== 'AM') return;  /* AMX ใช้ช่องเวลาอิสระ */ const sel = $('#f-time'); const keep = sel.value || time; sel.innerHTML = amTimeSelect(cur, $('#f-treat').value, keep); };
-  const fillDur = () => { if (session !== 'PM') return; const t = O.adminTreatments.find(x => x.name === $('#f-treat').value); $('#f-dur').value = t ? t.minutes : 30; };
+  const fillTimes = () => { if (session !== 'AM') return;  /* AMX ใช้ช่องเวลาอิสระ */ const sel = $('#f-time'); const keep = sel.value || time; sel.innerHTML = amTimeSelect(cur, $('#f-treat').value === OTH ? '' : $('#f-treat').value, keep); };
+  const fillDur = () => { if (session !== 'PM') return; const t = O.adminTreatments.find(x => x.name === $('#f-treat').value); $('#f-dur').value = t ? t.minutes : ($('#f-treat').value === OTH ? $('#f-dur').value : 30); };
   fillTimes(); fillDur();
-  $('#f-treat').addEventListener('change', () => { fillTimes(); fillDur(); if (session === 'AMX') { const o = $('#f-treat-o'); o.hidden = $('#f-treat').value !== OTH; if (!o.hidden) o.focus(); } });
+  $('#f-treat').addEventListener('change', () => { fillTimes(); fillDur(); });
   $('#f-date').addEventListener('change', async e => { if (session === 'AM' && e.target.value) { cur = await dayAppts(e.target.value); fillTimes(); } });
   $('#f-phone').addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 10); });
   $('#ok').onclick = async function () {
-    const p = Object.assign(readPerson(), { session, treatment: session === 'AMX' && $('#f-treat').value === OTH ? $('#f-treat-o').value.trim() : $('#f-treat').value, date: $('#f-date').value, time: $('#f-time').value, note: $('#f-note').value, teeth: $('#f-teeth').value });
+    const p = Object.assign(readPerson(), { session, treatment: session === 'WALKIN' ? $('#f-treat').value : readTreat(), date: $('#f-date').value, time: $('#f-time').value, note: $('#f-note').value, teeth: $('#f-teeth').value });
     if (session === 'PM') p.durationMin = $('#f-dur').value;
     if (session === 'WALKIN') p.status = $('#f-status').value;
     DQ.busy(this, true, 'กำลังบันทึก…');
@@ -277,9 +283,9 @@ async function openCreate(session, date, time) {
 }
 
 function openEdit(a) {
-  const isX = a.source === 'extra', list = a.session === 'AM' && !isX ? amTreatments() : allTreatments(); if (list.indexOf(a.treatment) < 0) list.push(a.treatment);
+  const stdList = a.session === 'AM' && a.source !== 'extra' ? amTreatments() : allTreatments();
   openDlg(`แก้ไขข้อมูล · ${esc(a.apptNo)}`, `<form novalidate>${personFields(a)}
-    <div class="field mt"><label for="f-treat">ประเภทการรักษา</label>${isX ? `<input class="input" id="f-treat" list="tl" value="${esc(a.treatment)}" maxlength="80"><datalist id="tl">${amTreatments().map(x => `<option>${esc(x)}</option>`).join('')}</datalist>` : `<select class="input" id="f-treat">${optList(list, a.treatment)}</select>`}</div>
+    <div class="field mt"><label for="f-treat">ประเภทการรักษา</label>${treatPicker(stdList, a.treatment)}</div>
     <div class="grid2 mt">${teethField(a.teeth)}<div class="field"><label for="f-note">หมายเหตุ</label><input class="input" id="f-note" maxlength="300" value="${esc(a.note)}"></div></div>
     <p class="xs muted mt">การเปลี่ยนวัน/เวลา ให้ใช้ปุ่ม “เปลี่ยนวัน/เวลา” ทุกการแก้ไขถูกบันทึกในประวัติพร้อมชื่อเจ้าหน้าที่</p><div id="derr"></div></form>`,
     `<button class="btn" data-close>ยกเลิก</button><button class="btn primary" id="ok">บันทึก</button>`);
@@ -287,7 +293,7 @@ function openEdit(a) {
   $('#f-teeth').addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 2); });
   $('#ok').onclick = async function () {
     DQ.busy(this, true);
-    try { await call('adminUpdate', Object.assign(readPerson(), { apptNo: a.apptNo, treatment: $('#f-treat').value, note: $('#f-note').value, teeth: $('#f-teeth').value }), { requestId: DQ.uuid() }); closeDlg(); toast('บันทึกการแก้ไขแล้ว', 'ok'); refresh(); }
+    try { await call('adminUpdate', Object.assign(readPerson(), { apptNo: a.apptNo, treatment: readTreat(), note: $('#f-note').value, teeth: $('#f-teeth').value }), { requestId: DQ.uuid() }); closeDlg(); toast('บันทึกการแก้ไขแล้ว', 'ok'); refresh(); }
     catch (err) { DQ.busy(this, false); $('#derr').innerHTML = `<div class="notice bad mt">${ic('alert')}<span>${esc(err.message)}</span></div>`; }
   };
 }
