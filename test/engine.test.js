@@ -156,3 +156,39 @@ console.log('ALL PASS, audit entries:',S.audit.length);
   assert(S.audit.some(a=>a.action==='admin_add')&&S.audit.some(a=>a.action==='admin_edit'));
   console.log('ADMINS PASS');
 }
+
+// ---- นัดเพิ่มช่วงเช้า (เจ้าหน้าที่) : อุดฟันเกินโควตา + นัดอื่น ๆ ระบุเอง
+{
+  const {S,call}=mk('2026-11-08'); const AD='เจ้าหน้าที่ A', D='2026-11-17';
+  const Pq=n=>({title:'นาย',firstName:n,lastName:'ทดสอบ',age:'30',rights:E.RIGHTS[0]});
+  const ph=i=>'08'+String(10000000+i);
+  // คนไข้ออนไลน์จองอุดฟันเต็ม 2 คิว
+  assert(call('book',{...Pq('ก'),phone:ph(1),treatment:'fill',date:D,time:'09:00',consent:true}).ok);
+  assert(call('book',{...Pq('ข'),phone:ph(2),treatment:'fill',date:D,time:'09:30',consent:true}).ok);
+  assert.equal(call('slots',{date:D,treatment:'fill'}).data.times.length,0);
+  // เจ้าหน้าที่เพิ่มอุดฟันคนที่ 3, 4 (เวลาซ้ำกับคิวเดิมได้)
+  const x1=call('adminCreate',{...Pq('ค'),phone:ph(3),session:'AMX',treatment:'อุดฟัน',date:D,time:'09:00'},AD); assert(x1.ok,JSON.stringify(x1));
+  assert.equal(x1.data.appt.session,'AM'); assert.equal(x1.data.appt.source,'extra'); assert.equal(x1.data.appt.treatment,'อุดฟัน');
+  assert(call('adminCreate',{...Pq('ง'),phone:ph(4),session:'AMX',treatment:'อุดฟัน',date:D,time:'09:00'},AD).ok);
+  // นัดอื่น ๆ พิมพ์เอง
+  const o=call('adminCreate',{...Pq('จ'),phone:ph(5),session:'AMX',treatment:'ตัดไหม',date:D,time:'11:45',note:'หลังผ่าตัด'},AD); assert(o.ok,JSON.stringify(o)); assert.equal(o.data.appt.treatment,'ตัดไหม');
+  assert.equal(call('adminCreate',{...Pq('ฉ'),phone:ph(6),session:'AMX',treatment:'อื่น ๆ',date:D,time:'10:00'},AD).code,'BAD_TREATMENT');
+  assert.equal(call('adminCreate',{...Pq('ช'),phone:ph(7),session:'AMX',treatment:'ตัดไหม',date:D,time:'12:00'},AD).code,'BAD_TIME');
+  assert.equal(call('adminCreate',{...Pq('ช'),phone:ph(7),session:'AMX',treatment:'ตัดไหม',date:D,time:'08:30'},AD).code,'BAD_TIME');
+  assert.equal(call('adminCreate',{...Pq('ช'),phone:ph(7),session:'AMX',treatment:'ตัดไหม',date:'2026-11-14',time:'10:00'},AD).code,'NOT_OPEN'); // เสาร์
+  assert.equal(call('adminCreate',{...Pq('ช'),phone:ph(7),session:'AMX',treatment:'อุดฟัน',date:D,time:'10:00'}).code,'AUTH');
+  assert.equal(call('adminCreate',{...Pq('ค'),phone:ph(3),session:'AMX',treatment:'อุดฟัน',date:D,time:'10:00'},AD).code,'ACTIVE_EXISTS'); // 1 คน 1 นัด
+  // คิวออนไลน์ไม่ถูกกระทบ (นัดเพิ่มไม่แย่งคิว) และคนไข้เลื่อน/ยกเลิกเองไม่ได้
+  const live=S.appts.filter(a=>a.source==='extra'); assert.equal(live.length,3);
+  assert.equal(call('slots',{date:D,treatment:'scale'}).data.times.length,3);
+  const lk=call('lookup',{apptNo:x1.data.appt.apptNo,phone:ph(3),pin:'1234'}).data; assert(!lk.canReschedule); assert(!lk.canCancel);
+  // ย้าย/แก้ไขนัดเพิ่ม
+  assert(call('adminMove',{apptNo:x1.data.appt.apptNo,date:D,time:'10:15'},AD).ok);
+  assert.equal(call('adminMove',{apptNo:x1.data.appt.apptNo,date:D,time:'13:00'},AD).code,'BAD_TIME');
+  const up=call('adminUpdate',{...Pq('ค'),phone:ph(3),apptNo:x1.data.appt.apptNo,treatment:'ขูดหินปูน + ขัดฟัน',note:''},AD); assert(up.ok,JSON.stringify(up));
+  // ยกเลิกแล้วฟื้นคืนได้
+  assert(call('adminSetStatus',{apptNo:o.data.appt.apptNo,status:'cancelled'},AD).ok); assert(call('adminSetStatus',{apptNo:o.data.appt.apptNo,status:'waiting'},AD).ok);
+  // รายงาน: โควตาออนไลน์ไม่รวมนัดเพิ่ม แต่แสดงจำนวนนัดเพิ่ม
+  const ds=call('adminDailySummary',{date:D},AD).data; assert.equal(ds.amUsed,2); assert.equal(ds.amExtra,3);
+  console.log('EXTRA PASS');
+}

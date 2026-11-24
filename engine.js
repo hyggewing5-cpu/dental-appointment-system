@@ -31,6 +31,8 @@ var Engine = (function () {
     { id: 'scale',   name: 'ขูดหินปูน',  group: 'scale_extract' },
     { id: 'extract', name: 'ถอนฟัน',     group: 'scale_extract' }
   ];
+  var EXTRA_END = '12:00';            // นัดเพิ่มช่วงเช้า (เจ้าหน้าที่) เริ่มได้ตั้งแต่เวลาเปิดจนถึงก่อนนี้
+  function isExtra(a) { return a && a.source === 'extra'; }
   var ADMIN_TREATMENTS = [
     { name: 'ผ่าฟันคุด', minutes: 90 },
     { name: 'อุดฟันยาก / อุดฟันหน้า', minutes: 60 },
@@ -198,7 +200,7 @@ var Engine = (function () {
   }
   function amOccupied(st, date, time, excludeNo) {
     return st.appts().some(function (a) {
-      return a.date === date && a.session === 'AM' && a.time === time && occupies(a) && a.apptNo !== excludeNo;
+      return a.date === date && a.session === 'AM' && !isExtra(a) && a.time === time && occupies(a) && a.apptNo !== excludeNo;
     });
   }
   function inWindow(st, date) {
@@ -216,6 +218,11 @@ var Engine = (function () {
     if (session === 'AM') {
       if (c.openDaysAM.indexOf(d) < 0) fail('NOT_OPEN', 'วันดังกล่าวไม่เปิดให้บริการ');
       if (closureFor(st, date)) fail('CLOSED', 'วันดังกล่าวปิดให้บริการ');
+      if (spec.extra) {     // นัดเพิ่มโดยเจ้าหน้าที่: ไม่จำกัดโควตา/ประเภท/ซ้ำเวลา (ไม่ใช้คิวออนไลน์)
+        if (!opt.admin) fail('FORBIDDEN', 'ไม่อนุญาต');
+        if (time < c.amSlots[0].time || time >= EXTRA_END) fail('BAD_TIME', 'นัดเพิ่มช่วงเช้าต้องอยู่ในช่วง ' + c.amSlots[0].time + '–' + EXTRA_END + ' น.');
+        return { session: 'AM', date: date, time: time, endTime: fromMin(toMin(time) + c.amSlotMinutes), durationMin: c.amSlotMinutes };
+      }
       var slot = null;
       for (i = 0; i < c.amSlots.length; i++) if (c.amSlots[i].time === time) slot = c.amSlots[i];
       if (!slot) fail('BAD_TIME', 'เวลานี้ไม่เปิดรับจอง');
@@ -277,7 +284,7 @@ var Engine = (function () {
       session: slot.session, durationMin: slot.durationMin,
       title: patient.title, firstName: patient.firstName, lastName: patient.lastName, age: patient.age, phone: patient.phone,
       treatment: tr.name, rights: patient.rights, status: extra.status || 'waiting', source: source,
-      adminOnly: slot.session === 'PM' ? 'Y' : '', pinHash: st.ctx.hash(no + ':' + pin),
+      adminOnly: (slot.session === 'PM' || source === 'extra') ? 'Y' : '', pinHash: st.ctx.hash(no + ':' + pin),
       note: cleanNote(extra.note), rescheduledFrom: extra.from || '', rescheduledTo: '',
       updatedAt: st.now.stamp, updatedBy: st.who()
     };
@@ -484,7 +491,7 @@ var Engine = (function () {
       date: date, dow: dow(date), today: st.now.date, closure: closureFor(st, date), openAM: op.am, openPM: op.pm,
       counts: tally(list), bySession: { AM: tally(list.filter(function (a) { return a.session === 'AM'; })), PM: tally(list.filter(function (a) { return a.session === 'PM'; })), WALKIN: tally(list.filter(function (a) { return a.session === 'WALKIN'; })) },
       byTreatment: groupCount(lv, function (a) { return a.treatment; }), byRights: groupCount(lv, function (a) { return a.rights; }), bySource: groupCount(lv, function (a) { return a.source; }),
-      amUsed: lv.filter(function (a) { return a.session === 'AM'; }).length, amCap: op.am ? c.amSlots.length : 0, pmUsedMin: pmUsed, pmCapMin: pmCap,
+      amUsed: lv.filter(function (a) { return a.session === 'AM' && !isExtra(a); }).length, amExtra: lv.filter(function (a) { return isExtra(a); }).length, amCap: op.am ? c.amSlots.length : 0, pmUsedMin: pmUsed, pmCapMin: pmCap,
       stale: all.filter(function (a) { return a.session !== 'WALKIN' && isActive(a) && a.date < st.now.date; }).length,
       next: next ? { date: next, appts: nextList } : null
     };
@@ -503,7 +510,7 @@ var Engine = (function () {
       var open = op.am || op.pm, isCounted = open && ds <= today;
       if (isCounted) { counted++; wdOpen[dow(ds)]++; wdSum[dow(ds)] += t.done; if (op.am) amCap += c.amSlots.length; }
       days.push({ date: ds, dow: dow(ds), open: open, closed: op.closed, counted: isCounted, total: t.total, waiting: t.waiting, treating: t.treating, done: t.done, cancelled: t.cancelled, noshow: t.noshow,
-        am: lv.filter(function (a) { return a.session === 'AM'; }).length, pm: lv.filter(function (a) { return a.session === 'PM'; }).length, walkin: lv.filter(function (a) { return a.session === 'WALKIN'; }).length });
+        am: lv.filter(function (a) { return a.session === 'AM' && !isExtra(a); }).length, amExtra: lv.filter(function (a) { return isExtra(a); }).length, pm: lv.filter(function (a) { return a.session === 'PM'; }).length, walkin: lv.filter(function (a) { return a.session === 'WALKIN'; }).length });
     }
     var tot = tally(list), done = list.filter(function (a) { return a.status === 'done'; });
     var amUsed = 0; days.forEach(function (x) { if (x.counted) amUsed += x.am; });
@@ -539,20 +546,22 @@ var Engine = (function () {
 
   ADMIN.adminOptions = function (st) {
     return { treatments: TREATMENTS, adminTreatments: ADMIN_TREATMENTS, rights: RIGHTS, titles: st.c.titles.concat(OTHER_TITLE), otherTitle: OTHER_TITLE, statuses: STATUSES,
-      amSlots: st.c.amSlots, pmStart: st.c.pmStart, pmEnd: st.c.pmEnd, today: st.now.date, clinicName: st.c.clinicName };
+      amSlots: st.c.amSlots, extraEnd: EXTRA_END, pmStart: st.c.pmStart, pmEnd: st.c.pmEnd, today: st.now.date, clinicName: st.c.clinicName };
   };
 
   ADMIN.adminCreate = function (st, p) {
-    var session = p.session;
+    var session = p.session, extra = session === 'AMX';
+    if (extra) session = 'AM';
     var patient = cleanPatient(p);
-    var tr = treatmentOf(p.treatment, session !== 'AM');
-    if (session === 'AM' && !tr.group) fail('BAD_TREATMENT', 'ช่วงเช้ารองรับเฉพาะ อุดฟัน / ขูดหินปูน / ถอนฟัน');
+    var tr = treatmentOf(p.treatment, session !== 'AM' || extra);
+    if (extra && /^อื่น ๆ\s*$/.test(tr.name)) fail('BAD_TREATMENT', 'กรุณาระบุว่านัดอะไร');
+    if (session === 'AM' && !extra && !tr.group) fail('BAD_TREATMENT', 'ช่วงเช้ารองรับเฉพาะ อุดฟัน / ขูดหินปูน / ถอนฟัน');
     var dur = p.durationMin;
     if (session === 'PM' && !dur) dur = tr.minutes || 30;
     if (session !== 'WALKIN') assertNoActive(st, patient, null);
-    var slot = validateSlot(st, { date: p.date, time: p.time || (session === 'WALKIN' ? st.c.walkinStart : ''), session: session, treatment: tr, durationMin: dur }, { admin: true });
+    var slot = validateSlot(st, { date: p.date, time: p.time || (session === 'WALKIN' ? st.c.walkinStart : ''), session: session, treatment: tr, durationMin: dur, extra: extra }, { admin: true });
     var status = (session === 'WALKIN' && STATUSES.indexOf(p.status) >= 0) ? p.status : 'waiting';
-    var r = createRecord(st, patient, tr, slot, session === 'WALKIN' ? 'walkin' : 'admin', { note: p.note, status: status });
+    var r = createRecord(st, patient, tr, slot, session === 'WALKIN' ? 'walkin' : (extra ? 'extra' : 'admin'), { note: p.note, status: status });
     audit(st, 'create', r.rec.apptNo, { source: r.rec.source, session: session, date: slot.date, time: slot.time, treatment: tr.name });
     return { appt: pub(r.rec), pin: r.pin };
   };
@@ -562,8 +571,8 @@ var Engine = (function () {
     var patient = cleanPatient({
       title: p.title, firstName: p.firstName, lastName: p.lastName, age: p.age, phone: p.phone, rights: p.rights
     });
-    var tr = treatmentOf(p.treatment, a.session !== 'AM');
-    if (a.session === 'AM' && occupies(a)) {
+    var tr = treatmentOf(p.treatment, a.session !== 'AM' || isExtra(a));
+    if (a.session === 'AM' && occupies(a) && !isExtra(a)) {
       var slot = null;
       st.c.amSlots.forEach(function (s) { if (s.time === a.time) slot = s; });
       if (!tr.group || !slot || tr.group !== slot.group) fail('TREATMENT_MISMATCH', 'ประเภทการรักษาไม่ตรงกับเวลาที่นัดไว้ — ให้ใช้ "เปลี่ยนวัน/เวลา" ร่วมด้วย');
@@ -584,9 +593,9 @@ var Engine = (function () {
   ADMIN.adminMove = function (st, p) {
     var a = getOrFail(st, p.apptNo);
     if (!isActive(a)) fail('NOT_ACTIVE', 'เลื่อนได้เฉพาะนัดที่ยังใช้งานอยู่ (รอรับบริการ / กำลังรักษา)');
-    var tr = treatmentOf(a.treatment, a.session !== 'AM');
+    var tr = treatmentOf(a.treatment, a.session !== 'AM' || isExtra(a));
     var dur = a.session === 'PM' ? (p.durationMin || a.durationMin) : a.durationMin;
-    var slot = validateSlot(st, { date: p.date, time: p.time, session: a.session, treatment: tr, durationMin: dur }, { admin: true, excludeNo: a.apptNo });
+    var slot = validateSlot(st, { date: p.date, time: p.time, session: a.session, treatment: tr, durationMin: dur, extra: isExtra(a) }, { admin: true, excludeNo: a.apptNo });
     if (slot.date === a.date && slot.time === a.time && slot.durationMin === a.durationMin) fail('SAME_SLOT', 'วันเวลาเหมือนเดิม');
     var patch = { date: slot.date, time: slot.time, endTime: slot.endTime, durationMin: slot.durationMin, updatedAt: st.now.stamp, updatedBy: st.who() };
     var before = { date: a.date, time: a.time, durationMin: a.durationMin };
@@ -605,8 +614,8 @@ var Engine = (function () {
     if (FREE.indexOf(a.status) >= 0 && FREE.indexOf(ns) < 0) {
       if (a.session !== 'WALKIN') {
         assertNoActive(st, a, a.apptNo);
-        var tr = treatmentOf(a.treatment, a.session !== 'AM');
-        validateSlot(st, { date: a.date, time: a.time, session: a.session, treatment: tr, durationMin: a.durationMin }, { admin: true, excludeNo: a.apptNo });
+        var tr = treatmentOf(a.treatment, a.session !== 'AM' || isExtra(a));
+        validateSlot(st, { date: a.date, time: a.time, session: a.session, treatment: tr, durationMin: a.durationMin, extra: isExtra(a) }, { admin: true, excludeNo: a.apptNo });
       }
     }
     var note = a.note;

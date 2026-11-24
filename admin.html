@@ -31,7 +31,7 @@ const ACTION_TH = { create: 'สร้างนัด', edit: 'แก้ไข�
 const FIELD_TH = { title: 'คำนำหน้า', firstName: 'ชื่อ', lastName: 'นามสกุล', age: 'อายุ', phone: 'เบอร์โทร', rights: 'สิทธิ', treatment: 'การรักษา', note: 'หมายเหตุ', from: 'จาก', to: 'เป็น', reason: 'เหตุผล', date: 'วันที่', time: 'เวลา', source: 'ช่องทาง', session: 'ช่วง', affected: 'ผู้ป่วยที่ได้รับผลกระทบ', dates: 'วันที่', newApptNo: 'นัดใหม่', durationMin: 'นาที' };
 const STATUS_ORDER = ['waiting', 'treating', 'done', 'cancelled', 'noshow'];
 const GROUP_TH = { fill: 'อุดฟัน', scale_extract: 'ขูดหินปูน / ถอนฟัน' };
-const SRC_TH = { online: 'จองออนไลน์', admin: 'เจ้าหน้าที่', walkin: 'Walk-in' };
+const SRC_TH = { online: 'จองออนไลน์', admin: 'เจ้าหน้าที่', walkin: 'Walk-in', extra: 'นัดเพิ่ม (เจ้าหน้าที่)' };
 const isFree = a => a.status === 'cancelled' || a.status === 'noshow';
 const fmtPhone = p => { p = String(p || ''); return p.length === 10 ? `${p.slice(0, 3)}-${p.slice(3, 6)}-${p.slice(6)}` : p; };
 const fullName = a => `${a.title}${a.firstName} ${a.lastName}`;
@@ -103,7 +103,7 @@ async function viewSchedule() {
   loading();
   try { A.day = await call('adminSchedule', { date: A.date }); } catch (e) { return failBox(e, viewSchedule); }
   const d = A.day, appts = d.appts;
-  const am = appts.filter(a => a.session === 'AM'), pm = appts.filter(a => a.session === 'PM'), wk = appts.filter(a => a.session === 'WALKIN');
+  const am = appts.filter(a => a.session === 'AM' && a.source !== 'extra'), amx = appts.filter(a => a.session === 'AM' && a.source === 'extra' && !isFree(a)).sort((a, b) => a.time < b.time ? -1 : 1), pm = appts.filter(a => a.session === 'PM'), wk = appts.filter(a => a.session === 'WALKIN');
   const slotAppt = t => am.find(a => a.time === t && !isFree(a));
   const inactive = appts.filter(isFree);
   const isToday = d.date === d.today;
@@ -141,6 +141,8 @@ async function viewSchedule() {
     <p class="muted" style="margin:-6px 0 14px"><b style="color:var(--ink)">${thai(d.date, { full: true })}</b>${isToday ? ' · วันนี้' : ''}</p>
     ${stale}${closed}<div class="stats">${stats}</div>
     <section class="sec"><div class="sec-h"><h2>ช่วงเช้า <small>09:00–11:30 น. · จองออนไลน์ได้</small></h2></div>${amHtml}</section>
+    <section class="sec"><div class="sec-h"><h2>นัดเพิ่มช่วงเช้า <small>เจ้าหน้าที่กำหนด · ไม่จำกัดจำนวน · ไม่ใช้คิวออนไลน์</small></h2>${d.openAM && !d.closure ? `<button class="btn sm primary" data-add="AMX">${ic('plus', 16)}เพิ่มนัดเกินโควตา / นัดอื่น ๆ</button>` : ''}</div>
+      <div class="list">${amx.length ? amx.map(a => `<div class="slot-row"><div class="slot-time">${a.time}<small>นัดเพิ่ม</small></div>${card(a)}</div>`).join('') : '<div class="empty-slot"><span>ยังไม่มีนัดเพิ่ม — เช่น อุดฟันคนที่ 3 ขึ้นไป หรือนัดตัดไหม/ตรวจติดตามผล</span></div>'}</div></section>
     <section class="sec"><div class="sec-h"><h2>ช่วงบ่าย <small>${esc(d.pmStart)}–${esc(d.pmEnd)} น. · เจ้าหน้าที่/ทันตแพทย์กำหนด</small></h2>${d.openPM && !d.closure ? `<button class="btn sm primary" data-add="PM">${ic('plus', 16)}เพิ่มนัดช่วงบ่าย</button>` : ''}</div>${pmHtml}</section>
     <section class="sec"><div class="sec-h"><h2>Walk-in <small>${esc(d.walkinStart)}–${esc(d.walkinEnd)} น. · ฉุกเฉิน/ปวดฟันรุนแรง</small></h2>${d.openAM ? `<button class="btn sm" data-add="WALKIN">${ic('plus', 16)}บันทึก Walk-in</button>` : ''}</div>
       <div class="list">${wk.length ? wk.map(card).join('') : '<div class="empty-slot"><span>ยังไม่มีรายการ Walk-in</span></div>'}</div></section>
@@ -226,16 +228,22 @@ function amTimeSelect(dayAppts, treat, selected, selfNo) {
 async function dayAppts(date) { try { return (await call('adminSchedule', { date })).appts; } catch (e) { return []; } }
 
 async function openCreate(session, date, time) {
-  const O = A.opts, title = { AM: 'เพิ่มนัดช่วงเช้า', PM: 'เพิ่มนัดช่วงบ่าย', WALKIN: 'บันทึก Walk-in' }[session];
+  const O = A.opts, title = { AM: 'เพิ่มนัดช่วงเช้า', AMX: 'เพิ่มนัดช่วงเช้า (เกินโควตา / อื่น ๆ)', PM: 'เพิ่มนัดช่วงบ่าย', WALKIN: 'บันทึก Walk-in' }[session];
   let cur = A.day.appts, curDate = date;
   const slotGroup = (O.amSlots.find(s => s.time === time) || {}).group;
-  const defTreat = session === 'AM' ? (slotGroup === 'scale_extract' ? 'ขูดหินปูน' : 'อุดฟัน') : session === 'PM' ? 'ผ่าฟันคุด' : 'ปวดฟันรุนแรง';
-  const timeField = session === 'AM'
+  const defTreat = session === 'AMX' ? 'อุดฟัน' : session === 'AM' ? (slotGroup === 'scale_extract' ? 'ขูดหินปูน' : 'อุดฟัน') : session === 'PM' ? 'ผ่าฟันคุด' : 'ปวดฟันรุนแรง';
+  const OTH = 'อื่น ๆ (ระบุเอง)';
+  const timeField = session === 'AMX'
+    ? `<div class="field"><label for="f-time">เวลา (${O.amSlots[0].time}–${O.extraEnd})</label><input class="input" id="f-time" type="time" min="${O.amSlots[0].time}" max="11:59" value="${time || '09:00'}"></div>`
+    : session === 'AM'
     ? `<div class="field"><label for="f-time">เวลา</label><select class="input" id="f-time"></select></div>`
     : session === 'PM'
       ? `<div class="field"><label for="f-time">เวลาเริ่ม (${O.pmStart}–${O.pmEnd})</label><input class="input" id="f-time" type="time" step="300" min="${O.pmStart}" max="${O.pmEnd}" value="${O.pmStart}"></div>`
       : `<div class="field"><label for="f-time">เวลา (08:00–08:59)</label><input class="input" id="f-time" type="time" min="08:00" max="08:59" value="08:00"></div>`;
-  const treatField = session === 'WALKIN'
+  const treatField = session === 'AMX'
+    ? `<div class="field"><label for="f-treat">ประเภทการรักษา</label><select class="input" id="f-treat">${optList(amTreatments().concat(OTH), 'อุดฟัน')}</select>
+       <input class="input" id="f-treat-o" maxlength="80" placeholder="เขียนอธิบายว่านัดอะไร เช่น ตัดไหม, ตรวจติดตามผล" style="margin-top:8px" hidden></div>`
+    : session === 'WALKIN'
     ? `<div class="field"><label for="f-treat">อาการ / การรักษา</label><input class="input" id="f-treat" list="tl" value="${esc(defTreat)}" maxlength="80"><datalist id="tl">${['ปวดฟันรุนแรง', 'ฟันบวม', 'อุบัติเหตุ/ฟันแตก', ...allTreatments()].map(x => `<option>${esc(x)}</option>`).join('')}</datalist></div>`
     : `<div class="field"><label for="f-treat">ประเภทการรักษา</label><select class="input" id="f-treat">${optList(session === 'AM' ? amTreatments() : allTreatments(), defTreat)}</select></div>`;
   openDlg(title, `<form id="cf" novalidate>${personFields()}
@@ -243,14 +251,14 @@ async function openCreate(session, date, time) {
     <div class="grid2 mt">${timeField}${session === 'PM' ? `<div class="field"><label for="f-dur">ระยะเวลา (นาที)</label><input class="input" id="f-dur" type="number" min="15" max="120" step="5" value="90"></div>` : session === 'WALKIN' ? `<div class="field"><label for="f-status">สถานะ</label><select class="input" id="f-status">${STATUS_ORDER.map(s => `<option value="${s}"${s === 'waiting' ? ' selected' : ''}>${DQ.STATUS[s].th}</option>`).join('')}</select></div>` : '<div></div>'}</div>
     <div class="field mt"><label for="f-note">หมายเหตุ</label><input class="input" id="f-note" maxlength="300"></div><div id="derr"></div></form>`,
     `<button class="btn" data-close>ยกเลิก</button><button class="btn primary" id="ok">${ic('check', 18)}บันทึกนัด</button>`);
-  const fillTimes = () => { if (session !== 'AM') return; const sel = $('#f-time'); const keep = sel.value || time; sel.innerHTML = amTimeSelect(cur, $('#f-treat').value, keep); };
+  const fillTimes = () => { if (session !== 'AM') return;  /* AMX ใช้ช่องเวลาอิสระ */ const sel = $('#f-time'); const keep = sel.value || time; sel.innerHTML = amTimeSelect(cur, $('#f-treat').value, keep); };
   const fillDur = () => { if (session !== 'PM') return; const t = O.adminTreatments.find(x => x.name === $('#f-treat').value); $('#f-dur').value = t ? t.minutes : 30; };
   fillTimes(); fillDur();
-  $('#f-treat').addEventListener('change', () => { fillTimes(); fillDur(); });
+  $('#f-treat').addEventListener('change', () => { fillTimes(); fillDur(); if (session === 'AMX') { const o = $('#f-treat-o'); o.hidden = $('#f-treat').value !== OTH; if (!o.hidden) o.focus(); } });
   $('#f-date').addEventListener('change', async e => { if (session === 'AM' && e.target.value) { cur = await dayAppts(e.target.value); fillTimes(); } });
   $('#f-phone').addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 10); });
   $('#ok').onclick = async function () {
-    const p = Object.assign(readPerson(), { session, treatment: $('#f-treat').value, date: $('#f-date').value, time: $('#f-time').value, note: $('#f-note').value });
+    const p = Object.assign(readPerson(), { session, treatment: session === 'AMX' && $('#f-treat').value === OTH ? $('#f-treat-o').value.trim() : $('#f-treat').value, date: $('#f-date').value, time: $('#f-time').value, note: $('#f-note').value });
     if (session === 'PM') p.durationMin = $('#f-dur').value;
     if (session === 'WALKIN') p.status = $('#f-status').value;
     DQ.busy(this, true, 'กำลังบันทึก…');
@@ -259,16 +267,16 @@ async function openCreate(session, date, time) {
       closeDlg(); A.date = r.appt.date; refresh(); if (A.view !== 'schedule') go('schedule');
       if (session === 'WALKIN') toast('บันทึก Walk-in แล้ว', 'ok');
       else openDlg('สร้างนัดสำเร็จ', `<div class="notice ok">${ic('check')}<span>เลขที่นัด <b class="num">${esc(r.appt.apptNo)}</b> — ${thai(r.appt.date)} ${r.appt.time} น.</span></div>
-        <p class="mt small muted">รหัสยืนยันสำหรับผู้ป่วย (ใช้เลื่อนนัดผ่านเว็บ${session === 'PM' ? ' — นัดช่วงบ่ายให้เจ้าหน้าที่เลื่อนให้เท่านั้น' : ''}):</p>
+        <p class="mt small muted">รหัสยืนยันสำหรับผู้ป่วย (ใช้เลื่อนนัดผ่านเว็บ${session === 'PM' || session === 'AMX' ? ' — นัดนี้ให้เจ้าหน้าที่เลื่อน/ยกเลิกให้เท่านั้น' : ''}):</p>
         <div class="slip-pin" style="margin:8px 0 0"><b>${esc(r.pin)}</b><small>แจ้งผู้ป่วยทางโทรศัพท์/เขียนลงบัตรนัด — ระบบจะไม่แสดงอีก</small></div>`, '<button class="btn primary" data-close>เรียบร้อย</button>');
     } catch (err) { DQ.busy(this, false); $('#derr').innerHTML = `<div class="notice bad mt">${ic('alert')}<span>${esc(err.message)}</span></div>`; }
   };
 }
 
 function openEdit(a) {
-  const list = a.session === 'AM' ? amTreatments() : allTreatments(); if (list.indexOf(a.treatment) < 0) list.push(a.treatment);
+  const isX = a.source === 'extra', list = a.session === 'AM' && !isX ? amTreatments() : allTreatments(); if (list.indexOf(a.treatment) < 0) list.push(a.treatment);
   openDlg(`แก้ไขข้อมูล · ${esc(a.apptNo)}`, `<form novalidate>${personFields(a)}
-    <div class="field mt"><label for="f-treat">ประเภทการรักษา</label><select class="input" id="f-treat">${optList(list, a.treatment)}</select></div>
+    <div class="field mt"><label for="f-treat">ประเภทการรักษา</label>${isX ? `<input class="input" id="f-treat" list="tl" value="${esc(a.treatment)}" maxlength="80"><datalist id="tl">${amTreatments().map(x => `<option>${esc(x)}</option>`).join('')}</datalist>` : `<select class="input" id="f-treat">${optList(list, a.treatment)}</select>`}</div>
     <div class="field mt"><label for="f-note">หมายเหตุ</label><input class="input" id="f-note" maxlength="300" value="${esc(a.note)}"></div>
     <p class="xs muted mt">การเปลี่ยนวัน/เวลา ให้ใช้ปุ่ม “เปลี่ยนวัน/เวลา” ทุกการแก้ไขถูกบันทึกในประวัติพร้อมชื่อเจ้าหน้าที่</p><div id="derr"></div></form>`,
     `<button class="btn" data-close>ยกเลิก</button><button class="btn primary" id="ok">บันทึก</button>`);
@@ -284,13 +292,13 @@ async function openMove(a) {
   const O = A.opts; let cur = await dayAppts(a.date);
   openDlg(`เปลี่ยนวัน/เวลา · ${esc(a.apptNo)}`, `<p class="small muted">${esc(fullName(a))} — ปัจจุบัน ${thai(a.date, { shortDay: true })} ${a.time} น.</p>
     <div class="grid2 mt"><div class="field"><label for="m-date">วันที่ใหม่</label><input class="input" id="m-date" type="date" value="${a.date}"></div>
-    ${a.session === 'AM' ? `<div class="field"><label for="m-time">เวลา</label><select class="input" id="m-time"></select></div>` : `<div class="field"><label for="m-time">เวลาเริ่ม</label><input class="input" id="m-time" type="time" step="300" min="${O.pmStart}" max="${O.pmEnd}" value="${a.time}"></div>`}</div>
+    ${a.session === 'AM' && a.source !== 'extra' ? `<div class="field"><label for="m-time">เวลา</label><select class="input" id="m-time"></select></div>` : `<div class="field"><label for="m-time">เวลาเริ่ม</label><input class="input" id="m-time" type="time" step="300" min="${a.source === 'extra' ? O.amSlots[0].time : O.pmStart}" max="${a.source === 'extra' ? '11:59' : O.pmEnd}" value="${a.time}"></div>`}</div>
     ${a.session === 'PM' ? `<div class="field mt"><label for="m-dur">ระยะเวลา (นาที)</label><input class="input" id="m-dur" type="number" min="15" max="120" step="5" value="${a.durationMin}"></div>` : ''}
     <div class="notice mt">${ic('info')}<span>ระบบตรวจสอบวันเปิดบริการ คิวว่าง และเวลาทับซ้อนให้อัตโนมัติ ประวัติเดิมถูกเก็บไว้ใน Log</span></div><div id="derr"></div>`,
     `<button class="btn" data-close>ยกเลิก</button><button class="btn primary" id="ok">ย้ายนัด</button>`);
-  const fill = () => { if (a.session === 'AM') $('#m-time').innerHTML = amTimeSelect(cur, a.treatment, a.time, a.apptNo); };
+  const fill = () => { if (a.session === 'AM' && a.source !== 'extra') $('#m-time').innerHTML = amTimeSelect(cur, a.treatment, a.time, a.apptNo); };
   fill();
-  $('#m-date').addEventListener('change', async e => { if (a.session === 'AM' && e.target.value) { cur = await dayAppts(e.target.value); fill(); } });
+  $('#m-date').addEventListener('change', async e => { if (a.session === 'AM' && a.source !== 'extra' && e.target.value) { cur = await dayAppts(e.target.value); fill(); } });
   $('#ok').onclick = async function () {
     DQ.busy(this, true);
     try {
@@ -484,7 +492,7 @@ async function repDay() {
     <div class="kpis">${kpi('นัดทั้งหมด', num(c.total), `ช่วงเช้า ${d.bySession.AM.total} · บ่าย ${d.bySession.PM.total} · Walk-in ${d.bySession.WALKIN.total}`)}${kpi('เสร็จสิ้น', num(c.done), 'รับบริการแล้ว', 'k-done')}${kpi('รอ / กำลังรักษา', num(pend), `รอ ${c.waiting} · กำลังรักษา ${c.treating}`, 'k-pend')}${kpi('ไม่มาตามนัด', num(c.noshow), '', 'k-mute')}${kpi('ยกเลิก', num(c.cancelled), '', 'k-bad')}</div>
     ${d.stale ? `<div class="banner warn">${ic('alert', 22)}<div><b>มีนัดวันก่อนหน้าที่ยังไม่ปิดสถานะ ${d.stale} รายการ</b><div class="small">ผู้ป่วยกลุ่มนี้จะจองออนไลน์ใหม่ไม่ได้จนกว่าจะปิดสถานะ</div></div></div>` : ''}
     <div class="rp-grid"><div class="rp-card"><h3>การใช้คิว</h3>
-      <div class="meter-row"><span>ช่วงเช้า (คิวออนไลน์)</span><b>${d.openAM ? `${d.amUsed} / ${d.amCap} คิว` : 'ไม่เปิด'}</b></div><div class="meter" role="img" aria-label="ใช้คิวช่วงเช้า ${amPct}%"><i style="width:${amPct}%"></i></div>
+      <div class="meter-row"><span>ช่วงเช้า (คิวออนไลน์)</span><b>${d.openAM ? `${d.amUsed} / ${d.amCap} คิว${d.amExtra ? ` (+นัดเพิ่ม ${d.amExtra})` : ''}` : 'ไม่เปิด'}</b></div><div class="meter" role="img" aria-label="ใช้คิวช่วงเช้า ${amPct}%"><i style="width:${amPct}%"></i></div>
       <div class="meter-row mt"><span>ช่วงบ่าย (ทันตแพทย์กำหนด)</span><b>${d.openPM ? `${hr(d.pmUsedMin)} / ${hr(d.pmCapMin)}` : 'ไม่เปิด'}</b></div><div class="meter" role="img" aria-label="ใช้เวลาช่วงบ่าย ${pmPct}%"><i style="width:${pmPct}%"></i></div></div>
       <div class="rp-card"><h3>ประเภทการรักษา (ไม่นับยกเลิก/ไม่มา)</h3>${hbars(d.byTreatment)}</div>
       <div class="rp-card"><h3>สิทธิการรักษา</h3>${hbars(d.byRights)}</div>
