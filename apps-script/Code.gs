@@ -5,7 +5,7 @@
  * ===================================================================== */
 var TZ = 'Asia/Bangkok';
 var SHEETS = {
-  appts:    { name: 'Appointments', cols: ['apptNo','createdAt','date','time','endTime','session','durationMin','title','firstName','lastName','age','phone','treatment','rights','status','source','adminOnly','pinHash','note','rescheduledFrom','rescheduledTo','updatedAt','updatedBy'] },
+  appts:    { name: 'Appointments', cols: ['apptNo','createdAt','date','time','endTime','session','durationMin','title','firstName','lastName','age','phone','treatment','rights','status','source','adminOnly','pinHash','note','rescheduledFrom','rescheduledTo','updatedAt','updatedBy','teeth'] },
   closures: { name: 'Closures',     cols: ['date','reason','createdBy','createdAt'] },
   audit:    { name: 'AuditLog',     cols: ['time','admin','action','apptNo','detail'] },
   settings: { name: 'Settings',     cols: ['key','value'] },
@@ -258,7 +258,7 @@ function setup() {
   var ss = SpreadsheetApp.getActive();
   Object.keys(SHEETS).forEach(function (k) {
     var def = SHEETS[k], s = ss.getSheetByName(def.name) || ss.insertSheet(def.name);
-    if (s.getLastRow() === 0) s.getRange(1, 1, 1, def.cols.length).setValues([def.cols]);
+    s.getRange(1, 1, 1, def.cols.length).setValues([def.cols]);   // เขียนหัวคอลัมน์ทุกครั้ง (เพิ่มคอลัมน์ใหม่เช่น teeth ให้อัตโนมัติ)
     s.getRange(1, 1, 1, def.cols.length).setFontWeight('bold').setBackground('#0f766e').setFontColor('#ffffff');
     s.setFrozenRows(1);
     // ทั้งแผ่นเป็นข้อความ: เบอร์โทรไม่ตัด 0 หน้า, วันที่ไม่ถูกแปลง, และไม่ถูกตีความเป็นสูตร

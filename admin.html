@@ -153,7 +153,7 @@ function card(a) {
   const sb = STATUS_ORDER.map(s => `<button class="sb ${DQ.STATUS[s].cls}${a.status === s ? ' on' : ''}" data-st="${s}" data-no="${a.apptNo}" aria-pressed="${a.status === s}">${DQ.STATUS[s].th}</button>`).join('');
   return `<article class="appt ${DQ.STATUS[a.status].cls}" data-no="${a.apptNo}">
     <div class="row between wrap"><span class="nm">${esc(fullName(a))} <span class="muted small" style="font-weight:400">· ${esc(a.age)} ปี</span></span>${DQ.statusPill(a.status)}</div>
-    <div class="meta"><span>${ic('phone', 14)} <a href="tel:${esc(a.phone)}">${fmtPhone(a.phone)}</a></span><span>${ic('tooth', 14)} ${esc(a.treatment)}</span><span>${ic('shield', 14)} ${esc(a.rights)}</span>
+    <div class="meta"><span>${ic('phone', 14)} <a href="tel:${esc(a.phone)}">${fmtPhone(a.phone)}</a></span><span>${ic('tooth', 14)} ${esc(a.treatment)}${a.teeth ? ` · <b>${esc(a.teeth)} ซี่</b>` : ''}</span><span>${ic('shield', 14)} ${esc(a.rights)}</span>
       ${a.session === 'PM' ? `<span>${ic('clock', 14)} ${a.time}–${a.endTime} (${a.durationMin} นาที)</span>` : ''}<span class="num">${esc(a.apptNo)}</span><span>${SRC_TH[a.source] || ''}</span></div>
     ${a.note ? `<div class="small muted">หมายเหตุ: ${esc(a.note)}</div>` : ''}
     <div class="statusbar" role="group" aria-label="เปลี่ยนสถานะ">${sb}</div>
@@ -214,6 +214,8 @@ function personFields(v) {
 }
 document.addEventListener('change', e => { if (e.target && e.target.id === 'f-title') { const o = $('#f-title-o'); o.hidden = e.target.value !== A.opts.otherTitle; if (!o.hidden) o.focus(); } });
 const readPerson = () => ({ title: $('#f-title').value === A.opts.otherTitle ? $('#f-title-o').value.trim() : $('#f-title').value, age: $('#f-age').value.trim(), firstName: $('#f-first').value, lastName: $('#f-last').value, phone: $('#f-phone').value.replace(/[\s-]/g, ''), rights: $('#f-rights').value });
+const nowHM = () => { const d = new Date(); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); };
+const teethField = v => `<div class="field"><label for="f-teeth">จำนวนซี่ที่อุด/ถอน <span class="muted xs">(ไม่บังคับ)</span></label><input class="input" id="f-teeth" inputmode="numeric" maxlength="2" placeholder="เช่น 2" value="${esc(v || '')}"></div>`;
 const amTreatments = () => A.opts.treatments.map(t => t.name);
 const allTreatments = () => amTreatments().concat(A.opts.adminTreatments.map(t => t.name));
 const groupOf = name => (A.opts.treatments.find(t => t.name === name) || {}).group;
@@ -239,7 +241,7 @@ async function openCreate(session, date, time) {
     ? `<div class="field"><label for="f-time">เวลา</label><select class="input" id="f-time"></select></div>`
     : session === 'PM'
       ? `<div class="field"><label for="f-time">เวลาเริ่ม (${O.pmStart}–${O.pmEnd})</label><input class="input" id="f-time" type="time" step="300" min="${O.pmStart}" max="${O.pmEnd}" value="${O.pmStart}"></div>`
-      : `<div class="field"><label for="f-time">เวลา (08:00–08:59)</label><input class="input" id="f-time" type="time" min="08:00" max="08:59" value="08:00"></div>`;
+      : `<div class="field"><label for="f-time">เวลา</label><input class="input" id="f-time" type="time" value="${nowHM()}"></div>`;
   const treatField = session === 'AMX'
     ? `<div class="field"><label for="f-treat">ประเภทการรักษา</label><select class="input" id="f-treat">${optList(amTreatments().concat(OTH), 'อุดฟัน')}</select>
        <input class="input" id="f-treat-o" maxlength="80" placeholder="เขียนอธิบายว่านัดอะไร เช่น ตัดไหม, ตรวจติดตามผล" style="margin-top:8px" hidden></div>`
@@ -249,8 +251,9 @@ async function openCreate(session, date, time) {
   openDlg(title, `<form id="cf" novalidate>${personFields()}
     <div class="grid2 mt">${treatField}<div class="field"><label for="f-date">วันที่</label><input class="input" id="f-date" type="date" value="${date}"></div></div>
     <div class="grid2 mt">${timeField}${session === 'PM' ? `<div class="field"><label for="f-dur">ระยะเวลา (นาที)</label><input class="input" id="f-dur" type="number" min="15" max="120" step="5" value="90"></div>` : session === 'WALKIN' ? `<div class="field"><label for="f-status">สถานะ</label><select class="input" id="f-status">${STATUS_ORDER.map(s => `<option value="${s}"${s === 'waiting' ? ' selected' : ''}>${DQ.STATUS[s].th}</option>`).join('')}</select></div>` : '<div></div>'}</div>
-    <div class="field mt"><label for="f-note">หมายเหตุ</label><input class="input" id="f-note" maxlength="300"></div><div id="derr"></div></form>`,
+    <div class="grid2 mt">${teethField('')}<div class="field"><label for="f-note">หมายเหตุ</label><input class="input" id="f-note" maxlength="300"></div></div><div id="derr"></div></form>`,
     `<button class="btn" data-close>ยกเลิก</button><button class="btn primary" id="ok">${ic('check', 18)}บันทึกนัด</button>`);
+  $('#f-teeth').addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 2); });
   const fillTimes = () => { if (session !== 'AM') return;  /* AMX ใช้ช่องเวลาอิสระ */ const sel = $('#f-time'); const keep = sel.value || time; sel.innerHTML = amTimeSelect(cur, $('#f-treat').value, keep); };
   const fillDur = () => { if (session !== 'PM') return; const t = O.adminTreatments.find(x => x.name === $('#f-treat').value); $('#f-dur').value = t ? t.minutes : 30; };
   fillTimes(); fillDur();
@@ -258,7 +261,7 @@ async function openCreate(session, date, time) {
   $('#f-date').addEventListener('change', async e => { if (session === 'AM' && e.target.value) { cur = await dayAppts(e.target.value); fillTimes(); } });
   $('#f-phone').addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 10); });
   $('#ok').onclick = async function () {
-    const p = Object.assign(readPerson(), { session, treatment: session === 'AMX' && $('#f-treat').value === OTH ? $('#f-treat-o').value.trim() : $('#f-treat').value, date: $('#f-date').value, time: $('#f-time').value, note: $('#f-note').value });
+    const p = Object.assign(readPerson(), { session, treatment: session === 'AMX' && $('#f-treat').value === OTH ? $('#f-treat-o').value.trim() : $('#f-treat').value, date: $('#f-date').value, time: $('#f-time').value, note: $('#f-note').value, teeth: $('#f-teeth').value });
     if (session === 'PM') p.durationMin = $('#f-dur').value;
     if (session === 'WALKIN') p.status = $('#f-status').value;
     DQ.busy(this, true, 'กำลังบันทึก…');
@@ -277,13 +280,14 @@ function openEdit(a) {
   const isX = a.source === 'extra', list = a.session === 'AM' && !isX ? amTreatments() : allTreatments(); if (list.indexOf(a.treatment) < 0) list.push(a.treatment);
   openDlg(`แก้ไขข้อมูล · ${esc(a.apptNo)}`, `<form novalidate>${personFields(a)}
     <div class="field mt"><label for="f-treat">ประเภทการรักษา</label>${isX ? `<input class="input" id="f-treat" list="tl" value="${esc(a.treatment)}" maxlength="80"><datalist id="tl">${amTreatments().map(x => `<option>${esc(x)}</option>`).join('')}</datalist>` : `<select class="input" id="f-treat">${optList(list, a.treatment)}</select>`}</div>
-    <div class="field mt"><label for="f-note">หมายเหตุ</label><input class="input" id="f-note" maxlength="300" value="${esc(a.note)}"></div>
+    <div class="grid2 mt">${teethField(a.teeth)}<div class="field"><label for="f-note">หมายเหตุ</label><input class="input" id="f-note" maxlength="300" value="${esc(a.note)}"></div></div>
     <p class="xs muted mt">การเปลี่ยนวัน/เวลา ให้ใช้ปุ่ม “เปลี่ยนวัน/เวลา” ทุกการแก้ไขถูกบันทึกในประวัติพร้อมชื่อเจ้าหน้าที่</p><div id="derr"></div></form>`,
     `<button class="btn" data-close>ยกเลิก</button><button class="btn primary" id="ok">บันทึก</button>`);
   $('#f-phone').addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 10); });
+  $('#f-teeth').addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 2); });
   $('#ok').onclick = async function () {
     DQ.busy(this, true);
-    try { await call('adminUpdate', Object.assign(readPerson(), { apptNo: a.apptNo, treatment: $('#f-treat').value, note: $('#f-note').value }), { requestId: DQ.uuid() }); closeDlg(); toast('บันทึกการแก้ไขแล้ว', 'ok'); refresh(); }
+    try { await call('adminUpdate', Object.assign(readPerson(), { apptNo: a.apptNo, treatment: $('#f-treat').value, note: $('#f-note').value, teeth: $('#f-teeth').value }), { requestId: DQ.uuid() }); closeDlg(); toast('บันทึกการแก้ไขแล้ว', 'ok'); refresh(); }
     catch (err) { DQ.busy(this, false); $('#derr').innerHTML = `<div class="notice bad mt">${ic('alert')}<span>${esc(err.message)}</span></div>`; }
   };
 }
@@ -528,7 +532,7 @@ async function repMonth() {
       <button class="btn sm" data-m="-1" aria-label="เดือนก่อนหน้า">‹</button><input class="input" type="month" id="rm" value="${r.month}" style="width:auto;min-height:40px"><button class="btn sm" data-m="1" aria-label="เดือนถัดไป">›</button><button class="btn sm" data-m="0">เดือนนี้</button>
       <button class="btn sm" id="csv">${ic('download', 16)}ดาวน์โหลด CSV</button><button class="btn sm" onclick="window.print()">${ic('print', 16)}พิมพ์ / PDF</button></div>
     ${printHead('รายงานผลการปฏิบัติงานประจำเดือน ' + mTh)}
-    <div class="kpis">${kpi('นัดทั้งหมด', num(t.total), delta(t.total, pv.total, ' นัด'))}${kpi('ผู้ป่วยที่รับบริการ (เสร็จสิ้น)', num(t.done), delta(t.done, pv.done, ' ราย'), 'k-done')}${kpi('อัตราไม่มาตามนัด', pctTxt(r.noshowRate), delta(r.noshowRate, pv.noshowRate, ' จุด'), 'k-mute')}${kpi('อัตรายกเลิก', pctTxt(r.cancelRate), delta(r.cancelRate, pv.cancelRate, ' จุด'), 'k-bad')}${kpi('ใช้คิวช่วงเช้า', pctTxt(r.amUtil), `${num(r.amUsed)} / ${num(r.amCap)} คิว (ถึงวันนี้)`)}${kpi('เฉลี่ยรับบริการ / วันทำการ', r.avgDonePerDay, `${r.countedDays} วันทำการที่ผ่านมา`, 'k-done')}</div>
+    <div class="kpis">${kpi('นัดทั้งหมด', num(t.total), delta(t.total, pv.total, ' นัด'))}${kpi('ผู้ป่วยที่รับบริการ (เสร็จสิ้น)', num(t.done), delta(t.done, pv.done, ' ราย'), 'k-done')}${kpi('อัตราไม่มาตามนัด', pctTxt(r.noshowRate), delta(r.noshowRate, pv.noshowRate, ' จุด'), 'k-mute')}${kpi('อัตรายกเลิก', pctTxt(r.cancelRate), delta(r.cancelRate, pv.cancelRate, ' จุด'), 'k-bad')}${kpi('ใช้คิวช่วงเช้า', pctTxt(r.amUtil), `${num(r.amUsed)} / ${num(r.amCap)} คิว (ถึงวันนี้)`)}${kpi('เฉลี่ยรับบริการ / วันทำการ', r.avgDonePerDay, `${r.countedDays} วันทำการที่ผ่านมา`, 'k-done')}${r.teethDone ? kpi('จำนวนซี่ที่อุด/ถอน', num(r.teethDone), 'เฉพาะนัดที่เสร็จสิ้นและบันทึกจำนวนซี่', 'k-done') : ''}</div>
     <div class="rp-grid"><div class="rp-card wide"><h3>จำนวนนัดรายวัน แยกตามสถานะ</h3>${colChart(r.days)}</div>
       <div class="rp-card"><h3>สัดส่วนสถานะนัดหมาย</h3><div class="donut-wrap"><div class="donut" style="background:conic-gradient(${grad})" role="img" aria-label="สัดส่วนสถานะนัดหมายของเดือน"><b>${num(t.total)}</b></div><div class="donut-list">${S.map(([k, l, col]) => `<div><span style="--c:${col}">${l}</span><b>${num(val[k])} <em class="muted small" style="font-style:normal">(${t.total ? Math.round(val[k] * 100 / t.total) : 0}%)</em></b></div>`).join('')}</div></div></div>
       <div class="rp-card"><h3>ผลงานแยกตามการรักษา (เสร็จสิ้น)</h3>${hbars(r.byTreatment, 'ราย')}</div>

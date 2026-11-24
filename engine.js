@@ -103,9 +103,9 @@ var Engine = (function () {
       amSlots: String(s.amSlots).split(',').map(function (x) {
         var p = x.split('='); return { time: p[0].trim(), group: (p[1] || '').trim() };
       }).filter(function (x) { return validTime(x.time) && x.group; }),
-      pmStart: s.pmStart, pmEnd: s.pmEnd,
+      pmStart: normTime(s.pmStart, '13:30'), pmEnd: normTime(s.pmEnd, '15:30'),
       openDaysAM: days(s.openDaysAM), openDaysPM: days(s.openDaysPM),
-      walkinStart: s.walkinStart, walkinEnd: s.walkinEnd
+      walkinStart: normTime(s.walkinStart, '08:00'), walkinEnd: normTime(s.walkinEnd, '09:00')
     };
   }
 
@@ -170,6 +170,13 @@ var Engine = (function () {
       age: age, phone: phone, rights: rights
     };
   }
+  function cleanTeeth(v) {
+    if (v == null || String(v).trim() === '') return '';
+    var t = String(v).trim();
+    if (!/^\d{1,2}$/.test(t) || +t < 1 || +t > 32) fail('BAD_TEETH', 'จำนวนซี่ต้องเป็นตัวเลข 1–32 (เว้นว่างได้)');
+    return String(+t);
+  }
+  function normTime(v, dflt) { var m = /(\d{1,2}):(\d{2})/.exec(String(v == null ? '' : v)); return m ? ('0' + m[1]).slice(-2) + ':' + m[2] : dflt; }
   function cleanNote(v) { return String(v == null ? '' : v).replace(/[<>]/g, '').trim().slice(0, 300); }
 
   function nextApptNo(st, date) {
@@ -255,7 +262,7 @@ var Engine = (function () {
     if (session === 'WALKIN') {
       if (!opt.admin) fail('FORBIDDEN', 'ไม่อนุญาต');
       if (c.openDaysAM.indexOf(d) < 0) fail('NOT_OPEN', 'วันดังกล่าวไม่เปิดให้บริการ');
-      if (time < c.walkinStart || time >= c.walkinEnd) fail('BAD_TIME', 'Walk-in ต้องอยู่ในช่วง ' + c.walkinStart + '–' + c.walkinEnd + ' น.');
+      if (!validTime(time)) fail('BAD_TIME', 'กรุณาระบุเวลาให้ถูกต้อง (HH:MM)');   // Walk-in ไม่จำกัดช่วงเวลา
       return { session: 'WALKIN', date: date, time: time, endTime: '', durationMin: 0 };
     }
     fail('BAD_SESSION', 'ประเภทนัดไม่ถูกต้อง');
@@ -285,7 +292,7 @@ var Engine = (function () {
       title: patient.title, firstName: patient.firstName, lastName: patient.lastName, age: patient.age, phone: patient.phone,
       treatment: tr.name, rights: patient.rights, status: extra.status || 'waiting', source: source,
       adminOnly: (slot.session === 'PM' || source === 'extra') ? 'Y' : '', pinHash: st.ctx.hash(no + ':' + pin),
-      note: cleanNote(extra.note), rescheduledFrom: extra.from || '', rescheduledTo: '',
+      note: cleanNote(extra.note), teeth: extra.teeth || '', rescheduledFrom: extra.from || '', rescheduledTo: '',
       updatedAt: st.now.stamp, updatedBy: st.who()
     };
     st.ctx.db.addAppointment(rec);
@@ -513,6 +520,7 @@ var Engine = (function () {
         am: lv.filter(function (a) { return a.session === 'AM' && !isExtra(a); }).length, amExtra: lv.filter(function (a) { return isExtra(a); }).length, pm: lv.filter(function (a) { return a.session === 'PM'; }).length, walkin: lv.filter(function (a) { return a.session === 'WALKIN'; }).length });
     }
     var tot = tally(list), done = list.filter(function (a) { return a.status === 'done'; });
+    var teethDone = 0; done.forEach(function (a) { teethDone += parseInt(a.teeth, 10) || 0; });
     var amUsed = 0; days.forEach(function (x) { if (x.counted) amUsed += x.am; });
     // ผู้ป่วยรายใหม่ = เสร็จสิ้นการรักษาครั้งแรกในเดือนนี้ (นับจากข้อมูลที่เก็บไว้)
     var firstDone = {}; all.forEach(function (a) { if (a.status === 'done') { var k = patientKey(st, a); if (!firstDone[k] || a.date < firstDone[k]) firstDone[k] = a.date; } });
@@ -522,7 +530,7 @@ var Engine = (function () {
     return {
       month: month, daysInMonth: n, openDays: days.filter(function (x) { return x.open; }).length, countedDays: counted,
       totals: tot, noshowRate: pct(tot.noshow, tot.done + tot.noshow), cancelRate: pct(tot.cancelled, tot.total),
-      doneRate: pct(tot.done, tot.done + tot.noshow + tot.cancelled), amUtil: pct(amUsed, amCap), amUsed: amUsed, amCap: amCap,
+      doneRate: pct(tot.done, tot.done + tot.noshow + tot.cancelled), teethDone: teethDone, amUtil: pct(amUsed, amCap), amUsed: amUsed, amCap: amCap,
       avgDonePerDay: counted ? Math.round(tot.done * 10 / counted) / 10 : 0,
       patients: { unique: uniq, fresh: fresh, returning: uniq - fresh },
       selfCancel: list.filter(function (a) { return a.status === 'cancelled' && String(a.note || '').indexOf('ผู้ป่วยยกเลิกเองผ่านเว็บไซต์') >= 0; }).length,
@@ -561,7 +569,7 @@ var Engine = (function () {
     if (session !== 'WALKIN') assertNoActive(st, patient, null);
     var slot = validateSlot(st, { date: p.date, time: p.time || (session === 'WALKIN' ? st.c.walkinStart : ''), session: session, treatment: tr, durationMin: dur, extra: extra }, { admin: true });
     var status = (session === 'WALKIN' && STATUSES.indexOf(p.status) >= 0) ? p.status : 'waiting';
-    var r = createRecord(st, patient, tr, slot, session === 'WALKIN' ? 'walkin' : (extra ? 'extra' : 'admin'), { note: p.note, status: status });
+    var r = createRecord(st, patient, tr, slot, session === 'WALKIN' ? 'walkin' : (extra ? 'extra' : 'admin'), { note: p.note, status: status, teeth: cleanTeeth(p.teeth) });
     audit(st, 'create', r.rec.apptNo, { source: r.rec.source, session: session, date: slot.date, time: slot.time, treatment: tr.name });
     return { appt: pub(r.rec), pin: r.pin };
   };
@@ -581,6 +589,7 @@ var Engine = (function () {
       title: patient.title, firstName: patient.firstName, lastName: patient.lastName, age: patient.age, phone: patient.phone,
       rights: patient.rights, treatment: tr.name, note: cleanNote(p.note), updatedAt: st.now.stamp, updatedBy: st.who()
     };
+    if (p.teeth !== undefined) { var nt = cleanTeeth(p.teeth); if (String(a.teeth == null ? '' : a.teeth) !== nt) patch.teeth = nt; }
     var changes = diffFields(a, patch);
     delete changes.updatedAt; delete changes.updatedBy;
     if (!Object.keys(changes).length) return { appt: pub(a), unchanged: true };

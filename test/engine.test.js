@@ -54,7 +54,7 @@ assert.equal(call('book',{...P,treatment:'fill',session:'PM',date:'2026-11-12',t
 assert.equal(call('reschedule',{apptNo:pm.data.appt.apptNo,phone:'0877777777',pin:'1234',date:'2026-11-17',time:'09:00'}).code,'ADMIN_ONLY');
 // walk-in ไม่กระทบคิว
 let w=call('adminCreate',{...Q,firstName:'ฉุกเฉิน',phone:'0844444444',session:'WALKIN',treatment:'ปวดฟันรุนแรง',date:'2026-11-09',time:'08:15',status:'done'},AD); assert(w.ok,JSON.stringify(w));
-assert.equal(call('adminCreate',{...Q,session:'WALKIN',treatment:'x',date:'2026-11-09',time:'09:30'},AD).code,'BAD_TIME');
+assert(call('adminCreate',{...Q,firstName:'วอล์ก',phone:'0855555551',session:'WALKIN',treatment:'x',date:'2026-11-09',time:'09:30'},AD).ok); // Walk-in ไม่จำกัดช่วงเวลา
 // ปิดวัน: ต้อง confirm, ห้ามยกเลิกอัตโนมัติ
 let cl=call('adminAddClosure',{from:'2026-11-20',reason:'ประชุม'},AD); assert(cl.data.needConfirm); assert.equal(cl.data.affected.length,1); assert.equal(S.closures.length,0);
 cl=call('adminAddClosure',{from:'2026-11-20',reason:'ประชุม',confirm:true},AD); assert.equal(cl.data.added,1);
@@ -191,4 +191,25 @@ console.log('ALL PASS, audit entries:',S.audit.length);
   // รายงาน: โควตาออนไลน์ไม่รวมนัดเพิ่ม แต่แสดงจำนวนนัดเพิ่ม
   const ds=call('adminDailySummary',{date:D},AD).data; assert.equal(ds.amUsed,2); assert.equal(ds.amExtra,3);
   console.log('EXTRA PASS');
+}
+
+// ---- Walk-in ไม่จำกัดเวลา + จำนวนซี่
+{
+  const {S,call}=mk('2026-11-24'); const AD='เจ้าหน้าที่ A', D='2026-11-24';
+  const Pq=(n,i)=>({title:'นาง',firstName:n,lastName:'ทดสอบ',age:'62',phone:'08'+String(20000000+i),rights:E.RIGHTS[0]});
+  let w=call('adminCreate',{...Pq('ก',1),session:'WALKIN',treatment:'ปวดฟันรุนแรง',date:D,time:'14:20',teeth:'2'},AD); assert(w.ok,JSON.stringify(w)); assert.equal(w.data.appt.time,'14:20'); assert.equal(w.data.appt.teeth,'2');
+  assert.equal(call('adminCreate',{...Pq('ข',2),session:'WALKIN',treatment:'ปวดฟัน',date:D,time:'25:99'},AD).code,'BAD_TIME');
+  assert.equal(call('adminCreate',{...Pq('ค',3),session:'WALKIN',treatment:'ถอนฟัน',date:D,time:'08:10',teeth:'abc'},AD).code,'BAD_TEETH');
+  assert.equal(call('adminCreate',{...Pq('ค',3),session:'WALKIN',treatment:'ถอนฟัน',date:D,time:'08:10',teeth:'40'},AD).code,'BAD_TEETH');
+  let n=call('adminCreate',{...Pq('ง',4),session:'WALKIN',treatment:'ถอนฟัน',date:D,time:'08:10'},AD); assert(n.ok); assert.equal(n.data.appt.teeth,'');
+  // แก้ไขจำนวนซี่ภายหลัง (เจ้าหน้าที่บันทึกหลังรักษา)
+  let u=call('adminUpdate',{...Pq('ง',4),apptNo:n.data.appt.apptNo,treatment:'ถอนฟัน',note:'',teeth:'3'},AD); assert(u.ok,JSON.stringify(u)); assert.equal(u.data.appt.teeth,'3');
+  assert(call('adminSetStatus',{apptNo:n.data.appt.apptNo,status:'done'},AD).ok);
+  assert(call('adminUpdate',{...Pq('ง',4),apptNo:n.data.appt.apptNo,treatment:'ถอนฟัน',note:''},AD).data.appt.teeth==='3'); // ไม่ส่ง teeth = ไม่แตะ
+  const m=call('adminMonthlyReport',{month:'2026-11'},AD).data; assert.equal(m.teethDone,3);
+  // Settings ที่ Google Sheets แปลงเวลาเป็นวันที่ ต้องยังใช้งานได้
+  S.settings.walkinStart='1899-12-30 08:00:00'; S.settings.pmStart='1899-12-30 13:30:00';
+  assert(call('adminCreate',{...Pq('จ',5),session:'WALKIN',treatment:'ปวดฟัน',date:D,time:'10:00'},AD).ok);
+  assert(call('adminCreate',{...Pq('ฉ',6),session:'PM',treatment:'ผ่าฟันคุด',date:D,time:'13:30'},AD).ok);
+  console.log('WALKIN/TEETH PASS');
 }
