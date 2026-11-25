@@ -104,13 +104,14 @@ async function viewSchedule() {
   loading();
   try { A.day = await call('adminSchedule', { date: A.date }); } catch (e) { return failBox(e, viewSchedule); }
   const d = A.day, appts = d.appts;
+  const oldBackend = !d.sessClosed; if (oldBackend) d.sessClosed = {};   // Apps Script ยังเป็นเวอร์ชันเก่า (ไม่มีข้อมูลปิดคิวรายส่วน)
   const am = appts.filter(a => a.session === 'AM' && a.source !== 'extra'), amx = appts.filter(a => a.session === 'AM' && a.source === 'extra' && !isFree(a)).sort((a, b) => a.time < b.time ? -1 : 1), pm = appts.filter(a => a.session === 'PM'), wk = appts.filter(a => a.session === 'WALKIN');
   const slotAppt = t => am.find(a => a.time === t && !isFree(a));
   const inactive = appts.filter(isFree);
   const isToday = d.date === d.today;
 
   const secCtl = code => {   // ปุ่มปิด/เปิดคิวรายส่วน
-    if (d.closure || !((code === 'PM') ? d.openPM : d.openAM)) return '';
+    if (oldBackend || d.closure || !((code === 'PM') ? d.openPM : d.openAM)) return '';
     const c = d.sessClosed[code];
     return c ? `<span class="chip" style="background:var(--bad-bg);color:var(--bad)" title="${esc(c.reason)}">${ic('ban', 14)} ปิดคิว · ${esc(c.reason)}</span><button class="btn sm" data-act="opensec" data-s="${code}">เปิดคิว</button>`
              : `<button class="btn sm" data-act="closesec" data-s="${code}" style="color:var(--bad);border-color:var(--bad)">${ic('ban', 16)}ปิดคิว</button>`;
@@ -147,7 +148,7 @@ async function viewSchedule() {
       <button class="btn sm" data-day="0"${isToday ? ' disabled' : ''}>วันนี้</button></div></div>
     <div class="row between wrap" style="margin:-6px 0 14px;gap:8px"><p class="muted" style="margin:0"><b style="color:var(--ink)">${thai(d.date, { full: true })}</b>${isToday ? ' · วันนี้' : ''}</p>
       ${!d.closure && (d.openAM || d.openPM) ? `<button class="btn sm" data-act="closeday" style="color:var(--bad);border-color:var(--bad)">${ic('ban', 16)}ปิดคิว${isToday ? 'วันนี้' : 'วันที่เลือก'}</button>` : ''}</div>
-    ${stale}${closed}<div class="stats">${stats}</div>
+    ${oldBackend ? `<div class="banner warn">${ic('alert', 22)}<div><b>Apps Script ยังเป็นเวอร์ชันเก่า</b><div class="small">ปุ่มปิด/เปิดคิวรายส่วนจะแสดงหลังวาง Code.gs + Engine.gs ใหม่ และ Deploy เวอร์ชันใหม่</div></div></div>` : ''}${stale}${closed}<div class="stats">${stats}</div>
     <section class="sec"><div class="sec-h"><h2>ช่วงเช้า <small>09:00–11:30 น. · จองออนไลน์ได้</small></h2>${secCtl('AM')}</div>${amHtml}</section>
     <section class="sec"><div class="sec-h"><h2>นัดเพิ่มช่วงเช้า <small>เจ้าหน้าที่กำหนด · ไม่จำกัดจำนวน · ไม่ใช้คิวออนไลน์</small></h2><div class="row" style="gap:8px;flex-wrap:wrap">${secCtl('AMX')}${d.openAM && !d.closure && !d.sessClosed.AMX ? `<button class="btn sm primary" data-add="AMX">${ic('plus', 16)}เพิ่มนัดเกินโควตา / นัดอื่น ๆ</button>` : ''}</div></div>
       <div class="list">${amx.length ? amx.map(a => `<div class="slot-row"><div class="slot-time">${a.time}<small>นัดเพิ่ม</small></div>${card(a)}</div>`).join('') : '<div class="empty-slot"><span>ยังไม่มีนัดเพิ่ม — เช่น อุดฟันคนที่ 3 ขึ้นไป หรือนัดตัดไหม/ตรวจติดตามผล</span></div>'}</div></section>
