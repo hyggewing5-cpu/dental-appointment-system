@@ -5,7 +5,7 @@ function mk(todayStr='2026-11-08'){
     listAppointments:()=>S.appts.map(a=>({...a})),addAppointment:a=>S.appts.push({...a}),
     updateAppointment:(n,p)=>Object.assign(S.appts.find(a=>a.apptNo===n),p),
     deleteAppointment:n=>{S.appts=S.appts.filter(a=>a.apptNo!==n)},
-    listClosures:()=>S.closures.map(c=>({...c})),addClosures:r=>S.closures.push(...r),removeClosure:d=>{S.closures=S.closures.filter(c=>c.date!==d)},
+    listClosures:()=>S.closures.map(c=>({...c})),addClosures:r=>S.closures.push(...r),removeClosure:(d,s)=>{S.closures=S.closures.filter(c=>!(c.date===d&&(c.session||'ALL')===(s||'ALL')))},
     addAudit:e=>S.audit.push(e),listAudit:()=>S.audit.slice().reverse()};
   const ctx=(admin,au)=>({db,admin:admin||null,adminUser:au||(admin?'admin':null),admins:{list:()=>S.admins.map(a=>({...a})),add:o=>S.admins.push({...o}),update:(u,p)=>Object.assign(S.admins.find(a=>a.username===u),p)},newSalt:()=>'salt',hashPw:(p,s)=>'h'+s+':'+p,now:()=>({date:todayStr,time:'10:00',stamp:todayStr+' 10:00:00'}),
     hash:s=>'h'+s,randomPin:()=>'1234',throttle:{blocked:k=>(fails[k]||0)>=5,fail:k=>fails[k]=(fails[k]||0)+1,reset:k=>delete fails[k]}});
@@ -229,4 +229,35 @@ console.log('ALL PASS, audit entries:',S.audit.length);
   assert.equal(call('adminCreate',{...Pq('ค',3),session:'AM',treatment:'จัดฟัน',date:D,time:'11:00'},AD).code,'SLOT_TAKEN');
   assert(call('adminCreate',{...Pq('ง',4),session:'PM',treatment:'ขัดฟันพิเศษ',date:D,time:'13:30',durationMin:30},AD).ok);
   console.log('CUSTOM TREAT PASS');
+}
+
+// ---- ปิด/เปิดคิวแยกส่วน (ช่วงเช้า / นัดเพิ่ม / ช่วงบ่าย)
+{
+  const {S,call}=mk('2026-11-08'); const AD='เจ้าหน้าที่ A', D='2026-11-17'; // อังคาร
+  const Pq=(n,i)=>({title:'นาย',firstName:n,lastName:'ทดสอบ',age:'40',phone:'08'+String(40000000+i),rights:E.RIGHTS[0]});
+  assert(call('book',{...Pq('ก',1),treatment:'fill',date:D,time:'09:00',consent:true}).ok);
+  assert(call('adminCreate',{...Pq('ข',2),session:'PM',treatment:'ผ่าฟันคุด',date:D,time:'13:30',durationMin:60},AD).ok);
+  // ปิดเฉพาะช่วงบ่าย: ถามยืนยันเพราะมี 1 นัดบ่าย (นัดเช้าไม่เกี่ยว)
+  let r=call('adminAddClosure',{from:D,reason:'ทันตแพทย์ลา',session:'PM'},AD); assert(r.data.needConfirm); assert.equal(r.data.affected.length,1); assert.equal(r.data.affected[0].session,'PM');
+  assert(call('adminAddClosure',{from:D,reason:'ทันตแพทย์ลา',session:'PM',confirm:true},AD).ok);
+  assert.equal(call('adminCreate',{...Pq('ค',3),session:'PM',treatment:'ผ่าฟันคุด',date:D,time:'14:45',durationMin:30},AD).code,'CLOSED');
+  assert(call('adminCreate',{...Pq('ง',4),session:'AMX',treatment:'อุดฟัน',date:D,time:'10:00'},AD).ok);       // นัดเพิ่มยังได้
+  assert(call('slots',{date:D,treatment:'scale'}).data.times.length>0);                                    // คิวออนไลน์ยังเปิด
+  const sc=call('adminSchedule',{date:D},AD).data; assert(sc.sessClosed.PM); assert(!sc.sessClosed.AM); assert(!sc.closure);
+  assert.equal(call('adminAddClosure',{from:D,reason:'x',session:'PM'},AD).code,'ALREADY');
+  // ปิดนัดเพิ่ม และปิดช่วงเช้า (ออนไลน์)
+  assert(call('adminAddClosure',{from:D,reason:'ประชุม',session:'AMX',confirm:true},AD).ok);
+  assert.equal(call('adminCreate',{...Pq('จ',5),session:'AMX',treatment:'อุดฟัน',date:D,time:'10:00'},AD).code,'CLOSED');
+  assert(call('adminAddClosure',{from:D,reason:'ประชุม',session:'AM',confirm:true},AD).ok);
+  assert.equal(call('slots',{date:D,treatment:'scale'}).data.state,'closed');
+  assert.equal(call('book',{...Pq('ฉ',6),treatment:'scale',date:D,time:'10:30',consent:true}).code,'CLOSED');
+  // เปิดคืนทีละส่วน
+  assert.equal(call('adminRemoveClosure',{date:D,session:'ALL'},AD).code,'NOT_FOUND');
+  assert(call('adminRemoveClosure',{date:D,session:'AM'},AD).ok); assert(call('book',{...Pq('ช',7),treatment:'scale',date:D,time:'10:30',consent:true}).ok);
+  assert(call('adminRemoveClosure',{date:D,session:'PM'},AD).ok); assert(call('adminCreate',{...Pq('ซ',8),session:'PM',treatment:'ผ่าฟันคุด',date:D,time:'14:45',durationMin:30},AD).ok);
+  // ปิดทั้งวันยังครอบทุกส่วน และปิดส่วนซ้ำกับทั้งวันไม่ได้
+  assert(call('adminAddClosure',{from:'2026-11-18',reason:'หยุด'},AD).ok);
+  assert.equal(call('adminAddClosure',{from:'2026-11-18',reason:'x',session:'PM'},AD).code,'ALREADY');
+  assert.equal(call('adminCreate',{...Pq('ฌ',9),session:'PM',treatment:'ผ่าฟันคุด',date:'2026-11-18',time:'13:30',durationMin:30},AD).code,'CLOSED');
+  console.log('SESSION CLOSE PASS');
 }

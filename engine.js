@@ -123,9 +123,14 @@ var Engine = (function () {
   /* ---------- ตัวช่วยข้อมูล ---------- */
   function occupies(a) { return FREE.indexOf(a.status) < 0; }
   function isActive(a) { return ACTIVE.indexOf(a.status) >= 0; }
-  function closureFor(st, date) {
+  var CLOSE_SESS = ['ALL', 'AM', 'AMX', 'PM'];   // ทั้งวัน / ช่วงเช้า(ออนไลน์) / นัดเพิ่มช่วงเช้า / ช่วงบ่าย
+  function closureFor(st, date, session) {       // ไม่ระบุ session = เฉพาะการปิดทั้งวัน
     var l = st.closures();
-    for (var i = 0; i < l.length; i++) if (l[i].date === date) return l[i];
+    for (var i = 0; i < l.length; i++) {
+      if (l[i].date !== date) continue;
+      var sc = l[i].session || 'ALL';
+      if (session ? (sc === 'ALL' || sc === session) : sc === 'ALL') return l[i];
+    }
     return null;
   }
   function treatmentOf(x, allowFree) {
@@ -224,7 +229,7 @@ var Engine = (function () {
 
     if (session === 'AM') {
       if (c.openDaysAM.indexOf(d) < 0) fail('NOT_OPEN', 'วันดังกล่าวไม่เปิดให้บริการ');
-      if (closureFor(st, date)) fail('CLOSED', 'วันดังกล่าวปิดให้บริการ');
+      if (closureFor(st, date, spec.extra ? 'AMX' : 'AM')) fail('CLOSED', 'วันดังกล่าวปิดให้บริการ');
       if (spec.extra) {     // นัดเพิ่มโดยเจ้าหน้าที่: ไม่จำกัดโควตา/ประเภท/ซ้ำเวลา (ไม่ใช้คิวออนไลน์)
         if (!opt.admin) fail('FORBIDDEN', 'ไม่อนุญาต');
         if (time < c.amSlots[0].time || time >= EXTRA_END) fail('BAD_TIME', 'นัดเพิ่มช่วงเช้าต้องอยู่ในช่วง ' + c.amSlots[0].time + '–' + EXTRA_END + ' น.');
@@ -246,7 +251,7 @@ var Engine = (function () {
     if (session === 'PM') {
       if (!opt.admin) fail('FORBIDDEN', 'ผู้ป่วยไม่สามารถจองช่วงบ่ายด้วยตนเองได้');
       if (c.openDaysPM.indexOf(d) < 0) fail('NOT_OPEN', 'วันดังกล่าวไม่มีนัดช่วงบ่าย');
-      if (closureFor(st, date)) fail('CLOSED', 'วันดังกล่าวปิดให้บริการ');
+      if (closureFor(st, date, 'PM')) fail('CLOSED', 'วันดังกล่าวปิดให้บริการ');
       var dur = parseInt(spec.durationMin, 10);
       if (isNaN(dur) || dur < 15 || dur > 120) fail('BAD_DURATION', 'ระยะเวลาต้องอยู่ระหว่าง 15–120 นาที');
       var s = toMin(time), e = s + dur;
@@ -358,7 +363,7 @@ var Engine = (function () {
     while (d.getMonth() === mo) {
       var ds = fmtDate(d);
       if (c_open(st, ds)) {
-        if (closureFor(st, ds)) days.push({ date: ds, state: 'closed', remaining: 0 });
+        if (closureFor(st, ds, 'AM')) days.push({ date: ds, state: 'closed', remaining: 0 });
         else {
           var n = amTimesFree(st, ds, tr.group, null).length;
           days.push({ date: ds, state: n > 0 ? 'open' : 'full', remaining: n });
@@ -375,7 +380,7 @@ var Engine = (function () {
   A.slots = function (st, p) {
     var tr = treatmentOf(p.treatment);
     if (!parseDate(p.date)) fail('BAD_DATE', 'วันที่ไม่ถูกต้อง');
-    if (!c_open(st, p.date) || closureFor(st, p.date)) return { date: p.date, times: [], state: closureFor(st, p.date) ? 'closed' : 'off' };
+    if (!c_open(st, p.date) || closureFor(st, p.date, 'AM')) return { date: p.date, times: [], state: closureFor(st, p.date, 'AM') ? 'closed' : 'off' };
     var times = amTimesFree(st, p.date, tr.group, p.excludeNo ? String(p.excludeNo).trim().toUpperCase() : null)
       .filter(function (t) { return !(p.date === st.now.date && t <= st.now.time); });
     return { date: p.date, times: times, state: times.length ? 'open' : 'full' };
@@ -458,7 +463,7 @@ var Engine = (function () {
     list.forEach(function (a) { counts[a.status]++; });
     return {
       date: date, dow: d, today: st.now.date,
-      closure: closureFor(st, date),
+      closure: closureFor(st, date), sessClosed: { AM: closureFor(st, date, 'AM'), AMX: closureFor(st, date, 'AMX'), PM: closureFor(st, date, 'PM') },
       openAM: c.openDaysAM.indexOf(d) >= 0, openPM: c.openDaysPM.indexOf(d) >= 0,
       slots: c.amSlots, pmStart: c.pmStart, pmEnd: c.pmEnd, walkinStart: c.walkinStart, walkinEnd: c.walkinEnd,
       appts: list.map(pub), counts: counts, stale: stale.map(pub)
@@ -685,25 +690,31 @@ var Engine = (function () {
     if (diffDays(from, to) > 62) fail('BAD_DATE', 'ปิดได้ครั้งละไม่เกิน 62 วัน');
     var reason = cleanNote(p.reason).slice(0, 120);
     if (!reason) fail('BAD_REASON', 'กรุณาระบุเหตุผล เช่น วันหยุดราชการ / ประชุม / อบรม');
+    var sess = CLOSE_SESS.indexOf(p.session) >= 0 ? p.session : 'ALL';
     var dates = [], d = from;
-    while (d <= to) { if (!closureFor(st, d)) dates.push(d); d = addDays(d, 1); }
+    while (d <= to) { if (!closureFor(st, d, sess === 'ALL' ? undefined : sess)) dates.push(d); d = addDays(d, 1); }
     if (!dates.length) fail('ALREADY', 'วันดังกล่าวถูกปิดไว้แล้ว');
     var set = {}; dates.forEach(function (x) { set[x] = 1; });
-    var affected = st.appts().filter(function (a) { return set[a.date] && a.session !== 'WALKIN' && isActive(a); })
+    var affected = st.appts().filter(function (a) {
+      if (!set[a.date] || a.session === 'WALKIN' || !isActive(a)) return false;
+      return sess === 'ALL' || (sess === 'PM' ? a.session === 'PM' : a.session === 'AM' && (sess === 'AMX') === isExtra(a));
+    })
       .sort(function (a, b) { return (a.date + a.time) < (b.date + b.time) ? -1 : 1; }).map(pub);
     if (affected.length && !p.confirm) return { needConfirm: true, affected: affected, dates: dates };
-    st.ctx.db.addClosures(dates.map(function (x) { return { date: x, reason: reason, createdBy: st.who(), createdAt: st.now.stamp }; }));
+    st.ctx.db.addClosures(dates.map(function (x) { return { date: x, reason: reason, createdBy: st.who(), createdAt: st.now.stamp, session: sess }; }));
     st.dirty();
-    audit(st, 'closure_add', '', { dates: dates.length > 3 ? dates[0] + ' … ' + dates[dates.length - 1] : dates.join(','), reason: reason, affected: affected.length });
+    audit(st, 'closure_add', '', { session: sess, dates: dates.length > 3 ? dates[0] + ' … ' + dates[dates.length - 1] : dates.join(','), reason: reason, affected: affected.length });
     // ห้ามยกเลิกนัดเดิมอัตโนมัติ — คืนรายชื่อให้เจ้าหน้าที่ติดต่อเอง
     return { added: dates.length, affected: affected };
   };
 
   ADMIN.adminRemoveClosure = function (st, p) {
-    if (!closureFor(st, p.date)) fail('NOT_FOUND', 'ไม่พบวันปิดดังกล่าว');
-    st.ctx.db.removeClosure(p.date);
+    var rs = CLOSE_SESS.indexOf(p.session) >= 0 ? p.session : 'ALL';
+    var has = st.closures().some(function (c) { return c.date === p.date && (c.session || 'ALL') === rs; });
+    if (!has) fail('NOT_FOUND', 'ไม่พบวันปิดดังกล่าว');
+    st.ctx.db.removeClosure(p.date, rs);
     st.dirty();
-    audit(st, 'closure_remove', '', { date: p.date });
+    audit(st, 'closure_remove', '', { date: p.date, session: rs });
     return { removed: p.date };
   };
 

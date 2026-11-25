@@ -6,7 +6,7 @@
 var TZ = 'Asia/Bangkok';
 var SHEETS = {
   appts:    { name: 'Appointments', cols: ['apptNo','createdAt','date','time','endTime','session','durationMin','title','firstName','lastName','age','phone','treatment','rights','status','source','adminOnly','pinHash','note','rescheduledFrom','rescheduledTo','updatedAt','updatedBy','teeth'] },
-  closures: { name: 'Closures',     cols: ['date','reason','createdBy','createdAt'] },
+  closures: { name: 'Closures',     cols: ['date','reason','createdBy','createdAt','session'] },
   audit:    { name: 'AuditLog',     cols: ['time','admin','action','apptNo','detail'] },
   settings: { name: 'Settings',     cols: ['key','value'] },
   admins:   { name: 'Admins',       cols: ['username','displayName','salt','hash','active'] }
@@ -227,9 +227,11 @@ var db_ = {
   },
   listClosures: function () { return readAll_(SHEETS.closures); },
   addClosures: function (rows) { appendRows_(SHEETS.closures, rows); },
-  removeClosure: function (date) {
-    var row = findRow_(SHEETS.closures, 'date', date);
-    if (row > 0) sheet_(SHEETS.closures).deleteRow(row);
+  removeClosure: function (date, session) {
+    var rows = readAll_(SHEETS.closures);
+    for (var i = rows.length - 1; i >= 0; i--) {
+      if (String(rows[i].date) === String(date) && (rows[i].session || 'ALL') === (session || 'ALL')) { sheet_(SHEETS.closures).deleteRow(i + 2); break; }
+    }
   },
   addAudit: function (e) { appendRows_(SHEETS.audit, [e]); },
   listAudit: function (limit) {

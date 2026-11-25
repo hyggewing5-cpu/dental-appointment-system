@@ -34,6 +34,7 @@ const GROUP_TH = { fill: 'อุดฟัน', scale_extract: 'ขูดหิ�
 const SRC_TH = { online: 'จองออนไลน์', admin: 'เจ้าหน้าที่', walkin: 'Walk-in', extra: 'นัดเพิ่ม (เจ้าหน้าที่)' };
 const isFree = a => a.status === 'cancelled' || a.status === 'noshow';
 const fmtPhone = p => { p = String(p || ''); return p.length === 10 ? `${p.slice(0, 3)}-${p.slice(3, 6)}-${p.slice(6)}` : p; };
+const SESS_TH = { ALL: 'ทั้งวัน', AM: 'ช่วงเช้า (จองออนไลน์)', AMX: 'นัดเพิ่มช่วงเช้า', PM: 'ช่วงบ่าย' };
 const fullName = a => `${a.title}${a.firstName} ${a.lastName}`;
 const tomin = t => { const p = t.split(':'); return +p[0] * 60 + +p[1]; };
 
@@ -108,6 +109,12 @@ async function viewSchedule() {
   const inactive = appts.filter(isFree);
   const isToday = d.date === d.today;
 
+  const secCtl = code => {   // ปุ่มปิด/เปิดคิวรายส่วน
+    if (d.closure || !((code === 'PM') ? d.openPM : d.openAM)) return '';
+    const c = d.sessClosed[code];
+    return c ? `<span class="chip" style="background:var(--bad-bg);color:var(--bad)" title="${esc(c.reason)}">${ic('ban', 14)} ปิดคิว · ${esc(c.reason)}</span><button class="btn sm" data-act="opensec" data-s="${code}">เปิดคิว</button>`
+             : `<button class="btn sm" data-act="closesec" data-s="${code}" style="color:var(--bad);border-color:var(--bad)">${ic('ban', 16)}ปิดคิว</button>`;
+  };
   const stats = STATUS_ORDER.map(s => `<div class="stat ${DQ.STATUS[s].cls}"><b>${d.counts[s]}</b><span>${DQ.STATUS[s].th}</span></div>`).join('');
   const stale = d.stale.length ? `<div class="banner warn">${ic('alert', 22)}<div><b>มีนัดของวันก่อนหน้าที่ยังไม่ปิดสถานะ ${d.stale.length} รายการ</b><div class="small">ผู้ป่วยกลุ่มนี้จะจองออนไลน์ใหม่ไม่ได้จนกว่าจะเปลี่ยนสถานะเป็น เสร็จสิ้น / ไม่มาตามนัด / ยกเลิก</div>
     <div class="mt-s" style="display:flex;flex-wrap:wrap;gap:6px">${d.stale.slice(0, 8).map(a => `<button class="btn sm" data-goto="${a.date}">${thai(a.date, { shortDay: true, noYear: true })} · ${esc(a.firstName)} ${esc(a.lastName)}</button>`).join('')}</div></div></div>` : '';
@@ -119,7 +126,7 @@ async function viewSchedule() {
   else amHtml = '<div class="list">' + d.slots.map(s => {
     const a = slotAppt(s.time);
     return `<div class="slot-row"><div class="slot-time">${s.time}<small>${s.group === 'fill' ? 'อุดฟัน' : 'ขูด/ถอน'}</small></div>` +
-      (a ? card(a) : `<div class="empty-slot"><span>ว่าง — เปิดรับ ${GROUP_TH[s.group] || ''}</span><button class="btn sm" data-add="AM" data-time="${s.time}">${ic('plus', 16)}เพิ่มนัด</button></div>`) + '</div>';
+      (a ? card(a) : `<div class="empty-slot"><span>ว่าง — เปิดรับ ${GROUP_TH[s.group] || ''}</span>${d.sessClosed.AM ? '' : `<button class="btn sm" data-add="AM" data-time="${s.time}">${ic('plus', 16)}เพิ่มนัด</button>`}</div>`) + '</div>';
   }).join('') + '</div>';
 
   /* ช่วงบ่าย */
@@ -141,10 +148,10 @@ async function viewSchedule() {
     <div class="row between wrap" style="margin:-6px 0 14px;gap:8px"><p class="muted" style="margin:0"><b style="color:var(--ink)">${thai(d.date, { full: true })}</b>${isToday ? ' · วันนี้' : ''}</p>
       ${!d.closure && (d.openAM || d.openPM) ? `<button class="btn sm" data-act="closeday" style="color:var(--bad);border-color:var(--bad)">${ic('ban', 16)}ปิดคิว${isToday ? 'วันนี้' : 'วันที่เลือก'}</button>` : ''}</div>
     ${stale}${closed}<div class="stats">${stats}</div>
-    <section class="sec"><div class="sec-h"><h2>ช่วงเช้า <small>09:00–11:30 น. · จองออนไลน์ได้</small></h2></div>${amHtml}</section>
-    <section class="sec"><div class="sec-h"><h2>นัดเพิ่มช่วงเช้า <small>เจ้าหน้าที่กำหนด · ไม่จำกัดจำนวน · ไม่ใช้คิวออนไลน์</small></h2>${d.openAM && !d.closure ? `<button class="btn sm primary" data-add="AMX">${ic('plus', 16)}เพิ่มนัดเกินโควตา / นัดอื่น ๆ</button>` : ''}</div>
+    <section class="sec"><div class="sec-h"><h2>ช่วงเช้า <small>09:00–11:30 น. · จองออนไลน์ได้</small></h2>${secCtl('AM')}</div>${amHtml}</section>
+    <section class="sec"><div class="sec-h"><h2>นัดเพิ่มช่วงเช้า <small>เจ้าหน้าที่กำหนด · ไม่จำกัดจำนวน · ไม่ใช้คิวออนไลน์</small></h2><div class="row" style="gap:8px;flex-wrap:wrap">${secCtl('AMX')}${d.openAM && !d.closure && !d.sessClosed.AMX ? `<button class="btn sm primary" data-add="AMX">${ic('plus', 16)}เพิ่มนัดเกินโควตา / นัดอื่น ๆ</button>` : ''}</div></div>
       <div class="list">${amx.length ? amx.map(a => `<div class="slot-row"><div class="slot-time">${a.time}<small>นัดเพิ่ม</small></div>${card(a)}</div>`).join('') : '<div class="empty-slot"><span>ยังไม่มีนัดเพิ่ม — เช่น อุดฟันคนที่ 3 ขึ้นไป หรือนัดตัดไหม/ตรวจติดตามผล</span></div>'}</div></section>
-    <section class="sec"><div class="sec-h"><h2>ช่วงบ่าย <small>${esc(d.pmStart)}–${esc(d.pmEnd)} น. · เจ้าหน้าที่/ทันตแพทย์กำหนด</small></h2>${d.openPM && !d.closure ? `<button class="btn sm primary" data-add="PM">${ic('plus', 16)}เพิ่มนัดช่วงบ่าย</button>` : ''}</div>${pmHtml}</section>
+    <section class="sec"><div class="sec-h"><h2>ช่วงบ่าย <small>${esc(d.pmStart)}–${esc(d.pmEnd)} น. · เจ้าหน้าที่/ทันตแพทย์กำหนด</small></h2><div class="row" style="gap:8px;flex-wrap:wrap">${secCtl('PM')}${d.openPM && !d.closure && !d.sessClosed.PM ? `<button class="btn sm primary" data-add="PM">${ic('plus', 16)}เพิ่มนัดช่วงบ่าย</button>` : ''}</div></div>${pmHtml}</section>
     <section class="sec"><div class="sec-h"><h2>Walk-in <small>${esc(d.walkinStart)}–${esc(d.walkinEnd)} น. · ฉุกเฉิน/ปวดฟันรุนแรง</small></h2>${d.openAM ? `<button class="btn sm" data-add="WALKIN">${ic('plus', 16)}บันทึก Walk-in</button>` : ''}</div>
       <div class="list">${wk.length ? wk.map(card).join('') : '<div class="empty-slot"><span>ยังไม่มีรายการ Walk-in</span></div>'}</div></section>
     ${inactive.length ? `<section class="sec"><div class="sec-h"><h2>ยกเลิก / ไม่มาตามนัด <small>${inactive.length} รายการ · คิวถูกคืนให้ระบบแล้ว</small></h2></div><div class="list">${inactive.map(card).join('')}</div></section>` : ''}`;
@@ -173,17 +180,22 @@ document.addEventListener('click', async e => {
   if ((b = t.closest('[data-move]'))) return openMove(find(b.dataset.move));
   if ((b = t.closest('[data-hist]'))) { const a = find(b.dataset.hist); return openHistory(a); }
   if ((b = t.closest('[data-st]'))) return changeStatus(b.dataset.no, b.dataset.st);
-  if ((b = t.closest('[data-act="closeday"]'))) return closeDayDlg();
+  if ((b = t.closest('[data-act="closeday"]'))) return closeDayDlg('ALL');
+  if ((b = t.closest('[data-act="closesec"]'))) return closeDayDlg(b.dataset.s);
+  if ((b = t.closest('[data-act="opensec"]'))) {
+    try { await call('adminRemoveClosure', { date: A.date, session: b.dataset.s }); toast('เปิดคิวแล้ว', 'ok'); refresh(); } catch (err) { toast(err.message, 'err'); }
+    return;
+  }
   if ((b = t.closest('[data-act="reopen"]'))) {
     try { await call('adminRemoveClosure', { date: b.dataset.d }); toast('เปิดวันให้บริการแล้ว', 'ok'); refresh(); } catch (err) { toast(err.message, 'err'); }
   }
 });
 document.addEventListener('change', e => { if (A.entered && e.target.id === 'dpick' && e.target.value) { A.date = e.target.value; viewSchedule(); } });
-function closeDayDlg() {
-  const date = A.date;
+function closeDayDlg(sess) {
+  const date = A.date, lbl = sess === 'ALL' ? 'วันนี้' : SESS_TH[sess];
   const chips = ['ทันตแพทย์ลา', 'ประชุม / อบรม', 'วันหยุดราชการ', 'ระบบ/อุปกรณ์ขัดข้อง'];
-  openDlg(`ปิดคิว · ${thai(date, { full: true })}`,
-    `<p class="small muted">ปิดทั้งวัน (ช่วงเช้า–บ่าย) ผู้ป่วยจะจองออนไลน์วันนี้ไม่ได้ ระบบ<b>ไม่ยกเลิกนัดที่จองไว้แล้วให้อัตโนมัติ</b> และเปิดคิวกลับได้ภายหลัง</p>
+  openDlg(`ปิดคิว${sess === 'ALL' ? '' : ' ' + SESS_TH[sess]} · ${thai(date, { full: true })}`,
+    `<p class="small muted">${{ ALL: 'ปิดทั้งวัน (ช่วงเช้า–บ่าย) ผู้ป่วยจะจองออนไลน์ไม่ได้', AM: 'ปิดคิวจองออนไลน์ช่วงเช้า เจ้าหน้าที่ยังเพิ่มนัดเพิ่มได้', AMX: 'ปิดไม่ให้เพิ่มนัดเพิ่มช่วงเช้า (คิวออนไลน์ไม่กระทบ)', PM: 'ปิดไม่ให้เพิ่มนัดช่วงบ่าย' }[sess]} ระบบ<b>ไม่ยกเลิกนัดที่มีอยู่ให้อัตโนมัติ</b> และเปิดคิวกลับได้ภายหลัง</p>
      <div class="field mt"><label for="cd-rs">เหตุผล</label><input class="input" id="cd-rs" maxlength="120" placeholder="เช่น ทันตแพทย์ลา / ประชุม" autocomplete="off"></div>
      <div class="mt-s" style="display:flex;flex-wrap:wrap;gap:6px">${chips.map(c => `<button type="button" class="btn sm" data-chip="${esc(c)}">${esc(c)}</button>`).join('')}</div><div id="derr"></div>`,
     `<button class="btn" data-close>ยกเลิก</button><button class="btn primary" id="cd-ok">${ic('ban', 18)}ปิดคิว</button>`);
@@ -191,20 +203,20 @@ function closeDayDlg() {
   const run = async (confirm, btn) => {
     DQ.busy(btn, true);
     try {
-      const x = await call('adminAddClosure', { from: date, to: date, reason: $('#cd-rs').value, confirm }, { requestId: confirm ? DQ.uuid() : undefined });
+      const x = await call('adminAddClosure', { from: date, to: date, session: sess, reason: $('#cd-rs').value, confirm }, { requestId: confirm ? DQ.uuid() : undefined });
       if (x.needConfirm) { DQ.busy(btn, false); return confirmAffected(x); }
-      closeDlg(); toast('ปิดคิววันนี้แล้ว', 'ok'); await viewSchedule();
+      closeDlg(); toast('ปิดคิว' + lbl + 'แล้ว', 'ok'); await viewSchedule();
       if (x.affected && x.affected.length) affectedDlg(x.affected, true);
     } catch (err) { DQ.busy(btn, false); $('#derr').innerHTML = `<div class="notice bad mt">${esc(err.message)}</div>`; }
   };
-  const listHtml = l => `<div class="banner warn">${ic('alert', 22)}<div><b>${l.length} ราย</b> มีนัดในวันนี้<div class="small">ระบบ<b>ไม่ยกเลิกนัดให้อัตโนมัติ</b> กรุณาติดต่อผู้ป่วยเพื่อเลื่อนนัด</div></div></div>
+  const listHtml = l => `<div class="banner warn">${ic('alert', 22)}<div><b>${l.length} ราย</b> มีนัดใน${sess === 'ALL' ? 'วันนี้' : SESS_TH[sess]}<div class="small">ระบบ<b>ไม่ยกเลิกนัดให้อัตโนมัติ</b> กรุณาติดต่อผู้ป่วยเพื่อเลื่อนนัด</div></div></div>
     <div class="list mt">${l.map(a => `<div class="appt ${DQ.STATUS[a.status].cls}"><div class="row between wrap"><b>${esc(fullName(a))}</b><span class="small num">${a.time} น.</span></div><div class="meta"><span>${ic('phone', 14)} <a href="tel:${esc(a.phone)}">${esc(a.phone)}</a></span><span>${ic('tooth', 14)} ${esc(a.treatment)}</span></div></div>`).join('')}</div>`;
   function confirmAffected(x) {
     const rs = $('#cd-rs').value;
     openDlg('มีผู้ป่วยได้รับผลกระทบ', listHtml(x.affected), `<button class="btn" data-close>ยกเลิก</button><button class="btn primary" id="cd-yes">ยืนยันปิดคิว (ไม่ยกเลิกนัด)</button>`);
     $('#cd-yes').onclick = async function () {
       DQ.busy(this, true);
-      try { const y = await call('adminAddClosure', { from: date, to: date, reason: rs, confirm: true }, { requestId: DQ.uuid() }); closeDlg(); toast('ปิดคิววันนี้แล้ว', 'ok'); await viewSchedule(); affectedDlg(y.affected || x.affected, true); }
+      try { const y = await call('adminAddClosure', { from: date, to: date, session: sess, reason: rs, confirm: true }, { requestId: DQ.uuid() }); closeDlg(); toast('ปิดคิว' + lbl + 'แล้ว', 'ok'); await viewSchedule(); affectedDlg(y.affected || x.affected, true); }
       catch (err) { DQ.busy(this, false); toast(err.message, 'err'); }
     };
   }
@@ -405,11 +417,12 @@ async function viewClosures() {
   main().innerHTML = `<div class="adm-top"><h1>จัดการวันเปิด–ปิดให้บริการ</h1></div>
     <div class="layout"><div class="card"><h3>ปิดวันให้บริการ</h3><p class="small muted mt-s">เช่น วันหยุดราชการ ทันตแพทย์/ผู้ช่วยลา ประชุม อบรม — ระบบจะไม่ยกเลิกนัดเดิมให้อัตโนมัติ</p>
       <form id="cf" class="mt" novalidate><div class="grid2"><div class="field"><label for="c-from">ตั้งแต่วันที่</label><input class="input" type="date" id="c-from" value="${r.today}"></div><div class="field"><label for="c-to">ถึงวันที่ (ถ้าปิดหลายวัน)</label><input class="input" type="date" id="c-to"></div></div>
+      <div class="field mt"><label for="c-sess">ส่วนที่ปิด</label><select class="input" id="c-sess">${Object.keys(SESS_TH).map(k => `<option value="${k}">${SESS_TH[k]}</option>`).join('')}</select></div>
       <div class="field mt"><label for="c-rs">เหตุผล</label><input class="input" id="c-rs" maxlength="120" placeholder="เช่น วันหยุดราชการ / ประชุม / ทันตแพทย์ลา"></div><div id="derr"></div>
       <button class="btn primary mt" type="submit">${ic('ban', 18)}ปิดวัน</button></form></div>
-    <aside class="card"><h3>วันที่ปิดไว้</h3><div class="list mt" id="cl">${r.closures.length ? r.closures.map(c => `<div class="appt" style="border-left-color:var(--bad)"><div class="row between"><div><b>${thai(c.date, { shortDay: true })}</b><div class="small muted">${esc(c.reason)}</div></div>${c.date >= r.today ? `<button class="btn sm danger" data-rm="${c.date}">เปิดวัน</button>` : '<span class="xs muted">ผ่านมาแล้ว</span>'}</div></div>`).join('') : '<p class="muted small">ยังไม่มีวันปิด</p>'}</div></aside></div>`;
+    <aside class="card"><h3>วันที่ปิดไว้</h3><div class="list mt" id="cl">${r.closures.length ? r.closures.map(c => `<div class="appt" style="border-left-color:var(--bad)"><div class="row between"><div><b>${thai(c.date, { shortDay: true })}</b><div class="small muted"><b>${SESS_TH[c.session || 'ALL']}</b> · ${esc(c.reason)}</div></div>${c.date >= r.today ? `<button class="btn sm danger" data-rm="${c.date}" data-s="${c.session || 'ALL'}">${(c.session || 'ALL') === 'ALL' ? 'เปิดวัน' : 'เปิดคิว'}</button>` : '<span class="xs muted">ผ่านมาแล้ว</span>'}</div></div>`).join('') : '<p class="muted small">ยังไม่มีวันปิด</p>'}</div></aside></div>`;
   async function submit(confirm) {
-    const p = { from: $('#c-from').value, to: $('#c-to').value || $('#c-from').value, reason: $('#c-rs').value, confirm };
+    const p = { from: $('#c-from').value, to: $('#c-to').value || $('#c-from').value, reason: $('#c-rs').value, session: $('#c-sess').value, confirm };
     try {
       const x = await call('adminAddClosure', p, { requestId: confirm ? DQ.uuid() : undefined });
       if (x.needConfirm) return showAffected(x, p, false);
@@ -420,7 +433,7 @@ async function viewClosures() {
   $('#cf').addEventListener('submit', e => { e.preventDefault(); submit(false); });
   $('#cl').addEventListener('click', async e => {
     const b = e.target.closest('[data-rm]'); if (!b) return;
-    try { await call('adminRemoveClosure', { date: b.dataset.rm }); toast('เปิดวันแล้ว', 'ok'); viewClosures(); } catch (err) { toast(err.message, 'err'); }
+    try { await call('adminRemoveClosure', { date: b.dataset.rm, session: b.dataset.s }); toast('เปิดแล้ว', 'ok'); viewClosures(); } catch (err) { toast(err.message, 'err'); }
   });
   function showAffected(x, p, done) {
     openDlg(done ? 'ปิดวันแล้ว — โปรดติดต่อผู้ป่วย' : 'มีผู้ป่วยได้รับผลกระทบ',

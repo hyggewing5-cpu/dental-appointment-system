@@ -68,7 +68,7 @@
       deleteAppointment: function (n) { store.appts = store.appts.filter(function (a) { return a.apptNo !== n; }); save(); },
       listClosures: function () { return load().closures.map(function (c) { return Object.assign({}, c); }); },
       addClosures: function (r) { load().closures.push.apply(store.closures, r); save(); },
-      removeClosure: function (d) { store.closures = store.closures.filter(function (c) { return c.date !== d; }); save(); },
+      removeClosure: function (d, s) { store.closures = store.closures.filter(function (c) { return !(c.date === d && (c.session || 'ALL') === (s || 'ALL')); }); save(); },
       addAudit: function (e) { load().audit.push(e); save(); },
       listAudit: function (n) { return load().audit.slice(-n).reverse(); }
     };
